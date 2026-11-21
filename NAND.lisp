@@ -152,12 +152,7 @@
 (test (or8way 1) 'error)
 
 (defun mux4way16 (a b c d sel)
-  (check-type a bus16)
-  (check-type b bus16)
-  (check-type c bus16)
-  (check-type d bus16)
   (check-type sel bus2)
-  
   (mux16 
     (mux16 a b (bit sel 1)) 
     (mux16 c d (bit sel 1))
@@ -181,16 +176,7 @@
 
 
 (defun mux8way16 (a b c d e f g h sel)
-  (check-type a bus16)
-  (check-type b bus16)
-  (check-type c bus16)
-  (check-type d bus16)
-  (check-type e bus16)
-  (check-type f bus16)
-  (check-type g bus16)
-  (check-type h bus16)
   (check-type sel bus3)
-  
   (mux16 
     (mux4way16 a b c d (subseq sel 1 (1+ 2))) 
     (mux4way16 e f g h (subseq sel 1 (1+ 2)))
@@ -245,7 +231,6 @@
                  #*111) #*1111111111111110)
 
 (defun dmux4way (in sel)
-  (check-type in bit)
   (check-type sel bus2)
   (multiple-value-bind (a0 b0) (dmux in (bit sel 0))
     (multiple-value-call #'values
@@ -264,7 +249,6 @@
 
 
 (defun dmux8way (in sel)
-  (check-type in bit)
   (check-type sel bus3)
   (multiple-value-bind (a0 b0) (dmux in (bit sel 0))
     (multiple-value-call #'values
@@ -290,3 +274,87 @@
 (test (dmux8way 0 #*101) (values 0 0 0 0 0 0 0 0))
 (test (dmux8way 0 #*110) (values 0 0 0 0 0 0 0 0))
 (test (dmux8way 0 #*111) (values 0 0 0 0 0 0 0 0))
+
+;====================================================================
+
+; macro level recursion effectively rewriting boilerplate nested multiple value binds representing ripple wiring
+(defmacro wire (bindings &body body)
+  (if (null bindings)
+      `(progn ,@body)
+      (destructuring-bind (vars form) (first bindings)
+        `(multiple-value-bind ,(if (listp vars) vars (list vars)) ,form
+           (wire ,(rest bindings) ,@body)))))
+
+(test 
+  (macroexpand-1
+    '(wire (((carry0 sum0) (halfadder b c))
+            ((carry1 sum) (halfadder a sum0))
+            (carry (xor carry0 carry1)))
+      (values carry sum)))
+  (values 
+    '(MULTIPLE-VALUE-BIND (CARRY0 SUM0) (HALFADDER B C) (WIRE (((CARRY1 SUM) (HALFADDER A SUM0)) (CARRY (XOR CARRY0 CARRY1))) (VALUES CARRY SUM)))
+    T))
+
+;====================================================================
+
+(defun halfadder (a b)
+  (values (and a b) (xor a b)))
+
+(test (halfadder 0 0) (values 0 0))
+(test (halfadder 0 1) (values 0 1))
+(test (halfadder 1 0) (values 0 1))
+(test (halfadder 1 1) (values 1 0))
+
+(defun fulladder (a b c)
+  (wire (((carry0 sum0) (halfadder b c))
+         ((carry1 sum) (halfadder a sum0))
+         (carry (xor carry0 carry1)))
+    (values carry sum)))
+
+(test (fulladder 0 0 0) (values 0 0))
+(test (fulladder 0 0 1) (values 0 1))
+(test (fulladder 0 1 0) (values 0 1))
+(test (fulladder 0 1 1) (values 1 0))
+(test (fulladder 1 0 0) (values 0 1))
+(test (fulladder 1 0 1) (values 1 0))
+(test (fulladder 1 1 0) (values 1 0))
+(test (fulladder 1 1 1) (values 1 1))
+
+
+(defun bus (&rest bits)
+  (make-array (length bits) :element-type 'bit :initial-contents bits))
+
+(defun add16 (a b)
+  (wire (((c15 s15) (halfadder (bit a 15) (bit b 15)))
+         ((c14 s14) (fulladder (bit a 14) (bit b 14) c15))
+         ((c13 s13) (fulladder (bit a 13) (bit b 13) c14))
+         ((c12 s12) (fulladder (bit a 12) (bit b 12) c13))
+         ((c11 s11) (fulladder (bit a 11) (bit b 11) c12))
+         ((c10 s10) (fulladder (bit a 10) (bit b 10) c11))
+         ((c9  s9)  (fulladder (bit a 9)  (bit b 9)  c10))
+         ((c8  s8)  (fulladder (bit a 8)  (bit b 8)  c9))
+         ((c7  s7)  (fulladder (bit a 7)  (bit b 7)  c8))
+         ((c6  s6)  (fulladder (bit a 6)  (bit b 6)  c7))
+         ((c5  s5)  (fulladder (bit a 5)  (bit b 5)  c6))
+         ((c4  s4)  (fulladder (bit a 4)  (bit b 4)  c5))
+         ((c3  s3)  (fulladder (bit a 3)  (bit b 3)  c4))
+         ((c2  s2)  (fulladder (bit a 2)  (bit b 2)  c3))
+         ((c1  s1)  (fulladder (bit a 1)  (bit b 1)  c2))
+         ((c0  s0)  (fulladder (bit a 0)  (bit b 0)  c1)))
+    c0 ; effectively (declare (ignore c0))
+    (bus s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15)))
+
+(test (add16 #*0000000000000000 #*0001000100010001) #*0001000100010001)
+(test (add16 #*1111111111111111 #*0001000100010001) #*0001000100010000)
+(test (add16 #*1111111111111111 #*1111111111111111) #*1111111111111110)
+(test (add16 #*1111111111111111 #*0000000000000001) #*0000000000000000)
+(test (add16 #*0000000000100000 #*1000000000100000) #*1000000001000000)
+(test (add16 #*0000000000100000 #*100000000010000) 'error)
+
+(defun inc16 (in16) (add16 in16 #*0000000000000001))
+
+(test (inc16 #*0000000000000000) #*0000000000000001)
+(test (inc16 #*0001000100010001) #*0001000100010010)
+(test (inc16 #*1111111111111111) #*0000000000000000)
+(test (inc16 #*0000000000100000) #*0000000000100001)
+(test (inc16 #*000000000010000) 'error)
