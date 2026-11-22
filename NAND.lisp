@@ -319,6 +319,7 @@
 
 ;====================================================================
 
+
 ; macro level recursion effectively rewriting boilerplate nested multiple value binds representing ripple wiring
 (defmacro wire (bindings &body body)
   (if (null bindings)
@@ -483,3 +484,214 @@
       'error)
 
 ;====================================================================
+
+#|
+;; Parallel fixed-point propagation model (kept for reference):
+;; Simulates simultaneous gate updates until outputs stabilize.
+;; While faithful to ideal zero-delay logic, transitioning from
+;; the forbidden (0 0) state to (1 1) causes infinite oscillation
+;; due to symmetrical timing.
+;;
+;; Using the sequential version below instead: its fixed
+;; evaluation order acts as a deterministic tie-breaker,
+;; mirroring real-world propagation skew that collapses
+;; metastability into a valid state without hanging.
+
+(wire ((q 0)
+       (q-not 1))
+  (defun sr-latch (s r)
+    (labels ((settle (curr-q curr-q-not)
+               (let ((next-q (nand s curr-q-not))
+                     (next-q-not (nand r curr-q)))
+                 (if (cl:and (= next-q curr-q)
+                             (= next-q-not curr-q-not))
+                     (values (setf q next-q)
+                             (setf q-not next-q-not))
+                     (settle next-q next-q-not)))))
+      (settle q q-not))))
+|#
+
+(defun make-sr-latch ()
+ (let ((q 0)
+       (q-not 1))
+   (lambda (s r)
+     (setf q-not (nand q r))
+     (values (setf q (nand s q-not))
+             (setf q-not (nand q r))))))
+
+(defparameter test-latch (make-sr-latch))
+
+; Ensure sequential testing
+(test (funcall test-latch 1 1) (values 0 1))
+(test (funcall test-latch 1 0) (values 0 1))
+(test (funcall test-latch 1 0) (values 0 1))
+(test (funcall test-latch 1 0) (values 0 1))
+(test (funcall test-latch 1 1) (values 0 1))
+(test (funcall test-latch 1 1) (values 0 1))
+(test (funcall test-latch 1 1) (values 0 1))
+(test (funcall test-latch 0 1) (values 1 0))
+(test (funcall test-latch 0 1) (values 1 0))
+(test (funcall test-latch 0 1) (values 1 0))
+(test (funcall test-latch 0 1) (values 1 0))
+(test (funcall test-latch 1 0) (values 0 1))
+(test (funcall test-latch 0 1) (values 1 0))
+(test (funcall test-latch 0 1) (values 1 0))
+(test (funcall test-latch 0 1) (values 1 0))
+(test (funcall test-latch 0 1) (values 1 0))
+(test (funcall test-latch 0 0) (values 1 1))
+; predictable metastable collapse
+(test (funcall test-latch 1 1) (values 1 0)) 
+
+#|
+; works due to predictable behaviour when (0 0)
+(defun d-latch (d e &aux (en (not e)))
+  (values (not (sr-latch (mux d 1 en) en))))
+|#
+
+; standard construction avoids (0 0)
+(defun make-d-latch ()
+  (let ((latch (make-sr-latch)))
+    (lambda (d en)
+      (wire ((a (nand d en))
+             (b (nand (not d) en)))
+            (values (funcall latch a b))))))
+
+(defparameter *test-d-latch-01* (make-d-latch))
+
+(test (funcall *test-d-latch-01* 0 1) 0)
+(test (funcall *test-d-latch-01* 0 0) 0)
+(test (funcall *test-d-latch-01* 0 0) 0)
+(test (funcall *test-d-latch-01* 1 1) 1)
+(test (funcall *test-d-latch-01* 1 0) 1)
+(test (funcall *test-d-latch-01* 1 0) 1)
+(test (funcall *test-d-latch-01* 1 0) 1)
+(test (funcall *test-d-latch-01* 0 0) 1)
+(test (funcall *test-d-latch-01* 1 0) 1)
+(test (funcall *test-d-latch-01* 0 1) 0)
+
+(defun make-dff ()
+  (let ((dl0 (make-d-latch))
+        (dl1 (make-d-latch)))
+    (lambda (d clock)
+      (funcall dl1 (funcall dl0 d (not clock)) clock))))
+
+(defparameter *test-dff-01* (make-dff))
+
+(test (funcall *test-dff-01* 0 0) 0)
+(test (funcall *test-dff-01* 0 1) 0)
+(test (funcall *test-dff-01* 1 0) 0)
+(test (funcall *test-dff-01* 1 1) 1)
+(test (funcall *test-dff-01* 0 0) 1)
+(test (funcall *test-dff-01* 0 1) 0)
+(test (funcall *test-dff-01* 1 1) 0)
+(test (funcall *test-dff-01* 1 0) 0)
+(test (funcall *test-dff-01* 1 1) 1)
+(test (funcall *test-dff-01* 0 1) 1)
+(test (funcall *test-dff-01* 0 0) 1)
+(test (funcall *test-dff-01* 0 1) 0)
+
+#|
+; Significantly faster version, not made from base gates
+(defun make-dff ()
+  (let ((q 0)
+        (previous-clock 0))
+    (lambda (d clock)
+      (when (cl:and (= previous-clock 0) (= clock 1))
+        (setf q d))
+      (setf previous-clock clock)
+      q)))
+|#
+
+
+(defun make-bit ()
+  (let ((dff (make-dff))
+        (dff-out 0))
+    (lambda (in load clock)
+      (setf dff-out (funcall dff (mux dff-out in load) clock)))))
+
+(defparameter test-bit (make-bit))
+
+(test (funcall test-bit 0 0 0) 0)
+(test (funcall test-bit 0 0 1) 0)
+(test (funcall test-bit 1 0 0) 0)
+(test (funcall test-bit 1 0 1) 0)
+(test (funcall test-bit 1 1 0) 0)
+(test (funcall test-bit 1 1 1) 1)
+(test (funcall test-bit 0 0 0) 1)
+(test (funcall test-bit 0 0 1) 1)
+(test (funcall test-bit 0 1 0) 1)
+(test (funcall test-bit 0 1 1) 0)
+(test (funcall test-bit 1 0 0) 0)
+(test (funcall test-bit 1 0 1) 0)
+(test (funcall test-bit 1 1 0) 0)
+(test (funcall test-bit 1 1 1) 1)
+
+
+(defun make-register ()
+  (wire
+    ((b0  (make-bit))
+     (b1  (make-bit))
+     (b2  (make-bit))
+     (b3  (make-bit))
+     (b4  (make-bit))
+     (b5  (make-bit))
+     (b6  (make-bit))
+     (b7  (make-bit))
+     (b8  (make-bit))
+     (b9  (make-bit))
+     (b10 (make-bit))
+     (b11 (make-bit))
+     (b12 (make-bit))
+     (b13 (make-bit))
+     (b14 (make-bit))
+     (b15 (make-bit)))
+    (lambda (in load clock)
+      (let ((out (make-array 16 :element-type 'bit)))
+        (setf
+          (sbit out 0)  (funcall b0  (sbit in 0)  load clock)
+          (sbit out 1)  (funcall b1  (sbit in 1)  load clock)
+          (sbit out 2)  (funcall b2  (sbit in 2)  load clock)
+          (sbit out 3)  (funcall b3  (sbit in 3)  load clock)
+          (sbit out 4)  (funcall b4  (sbit in 4)  load clock)
+          (sbit out 5)  (funcall b5  (sbit in 5)  load clock)
+          (sbit out 6)  (funcall b6  (sbit in 6)  load clock)
+          (sbit out 7)  (funcall b7  (sbit in 7)  load clock)
+          (sbit out 8)  (funcall b8  (sbit in 8)  load clock)
+          (sbit out 9)  (funcall b9  (sbit in 9)  load clock)
+          (sbit out 10) (funcall b10 (sbit in 10) load clock)
+          (sbit out 11) (funcall b11 (sbit in 11) load clock)
+          (sbit out 12) (funcall b12 (sbit in 12) load clock)
+          (sbit out 13) (funcall b13 (sbit in 13) load clock)
+          (sbit out 14) (funcall b14 (sbit in 14) load clock)
+          (sbit out 15) (funcall b15 (sbit in 15) load clock))
+        out))))
+
+
+(defparameter *test-register* (make-register))
+
+; Ensure sequential testing
+
+(test (funcall *test-register* #*0000000000000000 1 0) #*0000000000000000)
+(test (funcall *test-register* #*0000000000000000 1 1) #*0000000000000000)
+(test (funcall *test-register* #*0000000000000000 1 0) #*0000000000000000)
+
+(test (funcall *test-register* #*1111111111111111 1 0) #*0000000000000000)
+(test (funcall *test-register* #*1111111111111111 1 1) #*1111111111111111)
+(test (funcall *test-register* #*1111111111111111 1 0) #*1111111111111111)
+
+(test (funcall *test-register* #*0000000000000000 0 0) #*1111111111111111)
+(test (funcall *test-register* #*0000000000000000 0 1) #*1111111111111111)
+(test (funcall *test-register* #*0000000000000000 0 0) #*1111111111111111)
+
+(test (funcall *test-register* #*1010101010101010 1 0) #*1111111111111111)
+(test (funcall *test-register* #*1010101010101010 1 1) #*1010101010101010)
+(test (funcall *test-register* #*1010101010101010 1 0) #*1010101010101010)
+
+(test (funcall *test-register* #*0101010101010101 0 0) #*1010101010101010)
+(test (funcall *test-register* #*0101010101010101 0 1) #*1010101010101010)
+(test (funcall *test-register* #*0101010101010101 0 0) #*1010101010101010)
+
+(test (funcall *test-register* #*0101010101010101 1 0) #*1010101010101010)
+(test (funcall *test-register* #*0101010101010101 1 1) #*0101010101010101)
+(test (funcall *test-register* #*0101010101010101 1 0) #*0101010101010101)
+
