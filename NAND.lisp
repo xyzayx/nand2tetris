@@ -626,46 +626,57 @@
 (test (funcall test-bit 1 1 0) 0)
 (test (funcall test-bit 1 1 1) 1)
 
+#|
+(defun make-register ()
+  (let ((bits (make-array 16
+                        :initial-contents
+                        (loop repeat 16 collect (make-bit)))))
+    (lambda (in16 load clock)
+      (map 'bit-vector 
+           (lambda (b d) (funcall b d load clock)) 
+           bits in16))))
+|#
 
 (defun make-register ()
-  (wire
-    ((b0  (make-bit))
-     (b1  (make-bit))
-     (b2  (make-bit))
-     (b3  (make-bit))
-     (b4  (make-bit))
-     (b5  (make-bit))
-     (b6  (make-bit))
-     (b7  (make-bit))
-     (b8  (make-bit))
-     (b9  (make-bit))
-     (b10 (make-bit))
-     (b11 (make-bit))
-     (b12 (make-bit))
-     (b13 (make-bit))
-     (b14 (make-bit))
-     (b15 (make-bit)))
-    (lambda (in load clock)
-      (let ((out (make-array 16 :element-type 'bit)))
-        (setf
-          (sbit out 0)  (funcall b0  (sbit in 0)  load clock)
-          (sbit out 1)  (funcall b1  (sbit in 1)  load clock)
-          (sbit out 2)  (funcall b2  (sbit in 2)  load clock)
-          (sbit out 3)  (funcall b3  (sbit in 3)  load clock)
-          (sbit out 4)  (funcall b4  (sbit in 4)  load clock)
-          (sbit out 5)  (funcall b5  (sbit in 5)  load clock)
-          (sbit out 6)  (funcall b6  (sbit in 6)  load clock)
-          (sbit out 7)  (funcall b7  (sbit in 7)  load clock)
-          (sbit out 8)  (funcall b8  (sbit in 8)  load clock)
-          (sbit out 9)  (funcall b9  (sbit in 9)  load clock)
-          (sbit out 10) (funcall b10 (sbit in 10) load clock)
-          (sbit out 11) (funcall b11 (sbit in 11) load clock)
-          (sbit out 12) (funcall b12 (sbit in 12) load clock)
-          (sbit out 13) (funcall b13 (sbit in 13) load clock)
-          (sbit out 14) (funcall b14 (sbit in 14) load clock)
-          (sbit out 15) (funcall b15 (sbit in 15) load clock))
-        out))))
-
+  (let ((b0  (make-bit))
+        (b1  (make-bit))
+        (b2  (make-bit))
+        (b3  (make-bit))
+        (b4  (make-bit))
+        (b5  (make-bit))
+        (b6  (make-bit))
+        (b7  (make-bit))
+        (b8  (make-bit))
+        (b9  (make-bit))
+        (b10 (make-bit))
+        (b11 (make-bit))
+        (b12 (make-bit))
+        (b13 (make-bit))
+        (b14 (make-bit))
+        (b15 (make-bit)))
+    (lambda (in16 load clock)
+      (check-type in16 bus16)
+      (make-array
+        16
+        :element-type 'bit
+        :initial-contents
+        (list
+          (funcall b0  (bit in16 0)  load clock)
+          (funcall b1  (bit in16 1)  load clock)
+          (funcall b2  (bit in16 2)  load clock)
+          (funcall b3  (bit in16 3)  load clock)
+          (funcall b4  (bit in16 4)  load clock)
+          (funcall b5  (bit in16 5)  load clock)
+          (funcall b6  (bit in16 6)  load clock)
+          (funcall b7  (bit in16 7)  load clock)
+          (funcall b8  (bit in16 8)  load clock)
+          (funcall b9  (bit in16 9)  load clock)
+          (funcall b10 (bit in16 10) load clock)
+          (funcall b11 (bit in16 11) load clock)
+          (funcall b12 (bit in16 12) load clock)
+          (funcall b13 (bit in16 13) load clock)
+          (funcall b14 (bit in16 14) load clock)
+          (funcall b15 (bit in16 15) load clock))))))
 
 (defparameter *test-register* (make-register))
 
@@ -695,3 +706,99 @@
 (test (funcall *test-register* #*0101010101010101 1 1) #*0101010101010101)
 (test (funcall *test-register* #*0101010101010101 1 0) #*0101010101010101)
 
+#|
+(defun make-ram8 ()
+  (let ((registers (make-array 8
+                      :initial-contents
+                      (loop repeat 8 collect (make-register)))))
+    (lambda (in16 load address clock)
+      (let* ((loads (dmux8way load address))
+             (mem-contents
+               (map 'bus16
+                    (lambda (register enable)
+                      (funcall register in16 enable clock))
+                    registers loads)))
+        (mux8way16 mem-contents address)))))
+|#
+
+(defun make-ram8 ()
+  (let ((r0 (make-register))
+        (r1 (make-register))
+        (r2 (make-register))
+        (r3 (make-register))
+        (r4 (make-register))
+        (r5 (make-register))
+        (r6 (make-register))
+        (r7 (make-register)))
+    (lambda (in16 load address clock)
+      (multiple-value-bind
+          (load0 load1 load2 load3 load4 load5 load6 load7)
+          (dmux8way load address)
+        (mux8way16
+          (funcall r0 in16 load0 clock)
+          (funcall r1 in16 load1 clock)
+          (funcall r2 in16 load2 clock)
+          (funcall r3 in16 load3 clock)
+          (funcall r4 in16 load4 clock)
+          (funcall r5 in16 load5 clock)
+          (funcall r6 in16 load6 clock)
+          (funcall r7 in16 load7 clock)
+          address)))))
+
+
+(defparameter *test-ram8* (make-ram8))
+(test (funcall *test-ram8* #*0000000000000000 0 #*000 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000000000001 1 #*000 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000000000001 1 #*000 1) #*0000000000000001)
+(test (funcall *test-ram8* #*0000000000000001 1 #*000 0) #*0000000000000001)
+(test (funcall *test-ram8* #*0000000000000010 1 #*001 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000000000010 1 #*001 1) #*0000000000000010)
+(test (funcall *test-ram8* #*0000000000000010 1 #*001 0) #*0000000000000010)
+(test (funcall *test-ram8* #*0000000000000100 1 #*010 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000000000100 1 #*010 1) #*0000000000000100)
+(test (funcall *test-ram8* #*0000000000000100 1 #*010 0) #*0000000000000100)
+(test (funcall *test-ram8* #*0000000000001000 1 #*011 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000000001000 1 #*011 1) #*0000000000001000)
+(test (funcall *test-ram8* #*0000000000001000 1 #*011 0) #*0000000000001000)
+(test (funcall *test-ram8* #*0000000000010000 1 #*100 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000000010000 1 #*100 1) #*0000000000010000)
+(test (funcall *test-ram8* #*0000000000010000 1 #*100 0) #*0000000000010000)
+(test (funcall *test-ram8* #*0000000000100000 1 #*101 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000000100000 1 #*101 1) #*0000000000100000)
+(test (funcall *test-ram8* #*0000000000100000 1 #*101 0) #*0000000000100000)
+(test (funcall *test-ram8* #*0000000001000000 1 #*110 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000001000000 1 #*110 1) #*0000000001000000)
+(test (funcall *test-ram8* #*0000000001000000 1 #*110 0) #*0000000001000000)
+(test (funcall *test-ram8* #*0000000010000000 1 #*111 0) #*0000000000000000)
+(test (funcall *test-ram8* #*0000000010000000 1 #*111 1) #*0000000010000000)
+(test (funcall *test-ram8* #*0000000010000000 1 #*111 0) #*0000000010000000)
+(test (funcall *test-ram8* #*1111111111111111 0 #*000 0) #*0000000000000001)
+(test (funcall *test-ram8* #*1111111111111111 0 #*001 0) #*0000000000000010)
+(test (funcall *test-ram8* #*1111111111111111 0 #*010 0) #*0000000000000100)
+(test (funcall *test-ram8* #*1111111111111111 0 #*011 0) #*0000000000001000)
+(test (funcall *test-ram8* #*1111111111111111 0 #*100 0) #*0000000000010000)
+(test (funcall *test-ram8* #*1111111111111111 0 #*101 0) #*0000000000100000)
+(test (funcall *test-ram8* #*1111111111111111 0 #*110 0) #*0000000001000000)
+(test (funcall *test-ram8* #*1111111111111111 0 #*111 0) #*0000000010000000)
+(test (funcall *test-ram8* #*1010101010101010 1 #*000 0) #*0000000000000001)
+(test (funcall *test-ram8* #*1010101010101010 1 #*000 1) #*1010101010101010)
+(test (funcall *test-ram8* #*0101010101010101 1 #*010 0) #*0000000000000100)
+(test (funcall *test-ram8* #*0101010101010101 1 #*010 1) #*0101010101010101)
+(test (funcall *test-ram8* #*0000000000000000 0 #*00 0) 'error)
+(test (funcall *test-ram8* #*0000 0 #*000 0) 'error)
+
+(test
+
+  (mapcar
+    (lambda (address)
+      (funcall *test-ram8* #*0000000000000000 0 address 1))
+    (list #*000 #*001 #*010 #*011 #*100 #*101 #*110 #*111))
+
+  (list #*1010101010101010
+        #*0000000000000010
+        #*0101010101010101
+        #*0000000000001000
+        #*0000000000010000
+        #*0000000000100000
+        #*0000000001000000
+        #*0000000010000000))
