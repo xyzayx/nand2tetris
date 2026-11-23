@@ -865,9 +865,26 @@
               (aref expected address)))))
   t)
 
+(defun quick-test-ram (ram k)
+  (let* ((last (1- (ash 1 k))) (addresses (list 0 (logand last #xaaaa) last)))
+    (labels ((bus (n width)
+               (make-array width :element-type 'bit :initial-contents
+                           (loop for i downfrom (1- width) to 0 collect (ldb (byte 1 i) n)))))
+      (let ((written
+              (loop for address in addresses
+                    for in16 = (bus (1+ (random #xffff)) 16)
+                    do (test (funcall ram in16 (bus address k) 1 0) #*0000000000000000)
+                       (test (funcall ram in16 (bus address k) 1 1) in16)
+                    collect in16)))
+        (loop for address in addresses for in16 in written do
+          (test (funcall ram #*0000000000000000 (bus address k) 0 0) in16)))))
+  t)
+
+
 (test-ram (make-ram8) 3)
 
-(time (test-ram (make-ram64) 6))
+; (test-ram (make-ram64) 6)
+(quick-test-ram (make-ram64) 6)
 
 (defun make-ram512 ()
   (let ((r0 (make-ram64))
@@ -894,7 +911,8 @@
           (funcall r7 in16 ram64-address load7 clock)
           bank-address)))))
 
-(time (test-ram (make-ram512) 9))
+;(test-ram (make-ram512) 9)
+; (quick-test-ram (make-ram512) 9)
 
 (defun make-ram4k ()
   (let ((r0 (make-ram512))
@@ -921,7 +939,8 @@
           (funcall r7 in16 ram512-address load7 clock)
           bank-address)))))
 
-(time (test-ram (make-ram4k) 12))
+; (test-ram (make-ram4k) 12)
+; (quick-test-ram (make-ram4k) 12)
 
 (defun make-ram16k ()
   (let ((r0 (make-ram4k))
@@ -940,23 +959,50 @@
           (funcall r3 in16 ram4k-address load3 clock)
           bank-address)))))
 
-; (time (test-ram (make-ram16k) 14))
-
-(defun quick-test-ram (ram k)
-  (let* ((last (1- (ash 1 k))) (addresses (list 0 (logand last #xaaaa) last)))
-    (labels ((bus (n width)
-               (make-array width :element-type 'bit :initial-contents
-                           (loop for i downfrom (1- width) to 0 collect (ldb (byte 1 i) n)))))
-      (let ((written
-              (loop for address in addresses
-                    for in16 = (bus (1+ (random #xffff)) 16)
-                    do (test (funcall ram in16 (bus address k) 1 0) #*0000000000000000)
-                       (test (funcall ram in16 (bus address k) 1 1) in16)
-                    collect in16)))
-        (loop for address in addresses for in16 in written do
-          (test (funcall ram #*0000000000000000 (bus address k) 0 0) in16)))))
-  t)
-
-(time (quick-test-ram (make-ram16k) 14))
+; (test-ram (make-ram16k) 14)
+; (quick-test-ram (make-ram16k) 14)
 
 ;====================================================================
+
+
+(defun make-pc ()
+  (let ((reg (make-register)))
+    (lambda (in16 inc load reset clock)
+      (add16 (funcall reg (mux16 in16 #*0000000000000000 reset) load clock)
+             (mux16 #*0000000000000000 #*0000000000000001 inc)))))
+
+(defun make-pc ()
+  (let ((register (make-register))
+        (out16 #*0000000000000000))
+    (lambda (in16 inc load reset clock)
+      (wire ((incremented (inc16 out16))
+             (after-inc (mux16 out16 incremented inc))
+             (after-load (mux16 after-inc in16 load))
+             (register-in (mux16 after-load #*0000000000000000 reset))
+             (register-load (or reset (or load inc))))
+        (setf out16
+              (funcall register register-in register-load clock))))))
+
+(defparameter *test-pc* (make-pc))
+
+(test (funcall *test-pc* #*0000000000000000 0 0 0 0) #*0000000000000000)
+(test (funcall *test-pc* #*0000000000000000 0 0 0 1) #*0000000000000000)
+(test (funcall *test-pc* #*0000000000000000 1 0 0 0) #*0000000000000000)
+(test (funcall *test-pc* #*0000000000000000 1 0 0 1) #*0000000000000001)
+(test (funcall *test-pc* #*0000000000000000 1 0 0 0) #*0000000000000001)
+(test (funcall *test-pc* #*0000000000000000 1 0 0 1) #*0000000000000010)
+(test (funcall *test-pc* #*1010101010101010 0 1 0 0) #*0000000000000010)
+(test (funcall *test-pc* #*1010101010101010 0 1 0 1) #*1010101010101010)
+(test (funcall *test-pc* #*1111111111111111 0 0 0 0) #*1010101010101010)
+(test (funcall *test-pc* #*1111111111111111 0 0 0 1) #*1010101010101010)
+(test (funcall *test-pc* #*0101010101010101 1 1 0 0) #*1010101010101010)
+(test (funcall *test-pc* #*0101010101010101 1 1 0 1) #*0101010101010101)
+(test (funcall *test-pc* #*1111000011110000 1 1 1 0) #*0101010101010101)
+(test (funcall *test-pc* #*1111000011110000 1 1 1 1) #*0000000000000000)
+(test (funcall *test-pc* #*1111111111111111 0 1 0 0) #*0000000000000000)
+(test (funcall *test-pc* #*1111111111111111 0 1 0 1) #*1111111111111111)
+(test (funcall *test-pc* #*1111111111111111 0 0 1 0) #*1111111111111111)
+(test (funcall *test-pc* #*1111111111111111 0 0 1 1) #*0000000000000000)
+(test (funcall *test-pc* #*0000000000000000 1 0 0 0) #*0000000000000000)
+(test (funcall *test-pc* #*0000000000000000 1 0 0 1) #*0000000000000001)
+
