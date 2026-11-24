@@ -16,7 +16,11 @@
                                         (typep c (first want)))
                             (return-from test (type-of c))))))
          (let ((got (multiple-value-list ,expr)))
-           (assert (equal got want))
+           (assert (cl:and (= (length got) (length want))
+                           (every (lambda (g w)
+                                    (cl:or (eq w :any)
+                                           (equal g w)))
+                                  got want)))
            (values-list got))))))
 
 ;====================================================================
@@ -1006,3 +1010,93 @@
 (test (funcall *test-pc* #*0000000000000000 1 0 0 0) #*0000000000000000)
 (test (funcall *test-pc* #*0000000000000000 1 0 0 1) #*0000000000000001)
 
+;====================================================================
+
+; A ::   0 v v v  v  v  v  v   v  v  v  v   v  v  v  v   
+; C ::   1 1 1 a  c1 c2 c3 c4  c5 c6 d1 d2  d3 j1 j2 j3
+
+(defun make-cpu ()
+  (wire ((A (make-register))
+         (D (make-register))
+         (pc (make-pc))
+         (A-out #*0000000000000000)
+         (D-out #*0000000000000000))
+
+    (lambda (inM16 instruction16 reset clock)
+      
+      ; update output wire vars from previous clock
+      (setf A-out (funcall A #*0000000000000000 0 clock))
+      (setf D-out (funcall D #*0000000000000000 0 clock))
+      
+      (wire ((C? (bit instruction16 0))
+             (A? (not C?))
+             (A-or-M (mux16 A-out inM16 (bit instruction16 3)))
+             
+             ((out eq lt)
+              (alu D-out A-or-M
+                   (bit instruction16 4)  ; zx
+                   (bit instruction16 5)  ; nx
+                   (bit instruction16 6)  ; zy
+                   (bit instruction16 7)  ; ny
+                   (bit instruction16 8)  ; f
+                   (bit instruction16 9))) ; no
+             (gt (and (not eq) (not lt)))
+             
+             (write-to-A (and C? (bit instruction16 10)))
+             (write-to-D (and C? (bit instruction16 11)))
+             (write-to-M (and C? (bit instruction16 12)))
+             
+             (j1 (bit instruction16 13))
+             (j2 (bit instruction16 14))
+             (j3 (bit instruction16 15))
+
+             (load-pc? ; jump
+              (and C? (or (and j1 lt) (or (and j2 eq) (and j3 gt)))))
+             
+             (inc-pc? (not load-pc?)))
+
+        (funcall A (mux16 out instruction16 A?) (or A? write-to-A) clock)
+        (funcall D out write-to-D clock)
+        
+        (values out
+                write-to-M
+                (subseq A-out 1) ; 15 bits
+                (subseq (funcall pc A-out inc-pc? load-pc? reset clock)
+                        1)))))) ; 15 bits
+    
+(defparameter *test-cpu* (make-cpu))
+
+(test (funcall *test-cpu* #*0000000000000000 #*0011000000111001 0 0)
+      (values :any 0 #*000000000000000 #*000000000000000))
+(test (funcall *test-cpu* #*0000000000000000 #*0011000000111001 0 1)
+      (values :any 0 #*011000000111001 #*000000000000001))
+(test (funcall *test-cpu* #*0000000000000000 #*1110110000010000 0 0)
+      (values :any 0 #*011000000111001 #*000000000000001))
+(test (funcall *test-cpu* #*0000000000000000 #*1110110000010000 0 1)
+      (values :any 0 #*011000000111001 #*000000000000010))
+(test (funcall *test-cpu* #*0000000000000000 #*0101101110100000 0 0)
+      (values :any 0 #*011000000111001 #*000000000000010))
+(test (funcall *test-cpu* #*0000000000000000 #*0101101110100000 0 1)
+      (values :any 0 #*101101110100000 #*000000000000011))
+(test (funcall *test-cpu* #*0000000000000000 #*1110000111110000 0 0)
+      (values :any 0 #*101101110100000 #*000000000000011))
+(test (funcall *test-cpu* #*0000000000000000 #*1110000111110000 0 1)
+      (values :any 0 #*010101101100111 #*000000000000100))
+(test (funcall *test-cpu* #*0000000000000000 #*0000001111101011 0 0)
+      (values :any 0 #*010101101100111 #*000000000000100))
+(test (funcall *test-cpu* #*0000000000000000 #*0000001111101011 0 1)
+      (values :any 0 #*000001111101011 #*000000000000101))
+(test (funcall *test-cpu* #*0000000000000000 #*1110001100001000 0 0)
+      (values #*0010101101100111 1 #*000001111101011 #*000000000000101))
+(test (funcall *test-cpu* #*0000000000000000 #*1110001100001000 0 1)
+      (values #*0010101101100111 1 #*000001111101011 #*000000000000110))
+(test (funcall *test-cpu* #*0000000000000000 #*0000001111101100 0 0)
+      (values :any 0 #*000001111101011 #*000000000000110))
+(test (funcall *test-cpu* #*0000000000000000 #*0000001111101100 0 1)
+      (values :any 0 #*000001111101100 #*000000000000111))
+(test (funcall *test-cpu* #*0000000000000000 #*1110001110011000 0 0)
+      (values #*0010101101100110 1 #*000001111101100 #*000000000000111))
+(test (funcall *test-cpu* #*0000000000000000 #*1110001110011000 0 1)
+      (values #*0010101101100101 1 #*000001111101100 #*000000000001000))
+
+;====================================================================
