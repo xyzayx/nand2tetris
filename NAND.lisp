@@ -1,7 +1,17 @@
 
+#+ccl
+(progn
+  (ccl:set-lisp-heap-gc-threshold (* 512 1024 1024))
+  (ccl:use-lisp-heap-gc-threshold))
+
+#+sbcl
+(setf (sb-ext:bytes-consed-between-gcs) (* 512 1024 1024))
+
+;--------------------------------------------------------------------
+
 (defpackage :nand2tetris
   (:use :cl)
-  (:shadow :not :and :or))
+  (:shadow :not :and :or :any))
 
 (in-package :nand2tetris)
 
@@ -18,8 +28,7 @@
          (let ((got (multiple-value-list ,expr)))
            (assert (cl:and (= (length got) (length want))
                            (every (lambda (g w)
-                                    (cl:or (eq w :any)
-                                           (equal g w)))
+                                    (cl:or (eq w :any) (equal g w)))
                                   got want)))
            (values-list got))))))
 
@@ -1076,3 +1085,119 @@
 
 ;====================================================================
 
+(defun make-rom32k (prog-list)
+  (when (> (length prog-list) (ash 1 15))
+    (error "ROM32K can hold at most 32768 instructions."))
+  (let ((mem (make-ram32k)))
+    (loop for in16 in prog-list
+          for i from 0
+          for address = (integer-to-bus i 15)
+          do (funcall mem in16 address 1 0)
+             (funcall mem in16 address 1 1))
+    (lambda (address clock)
+      (funcall mem #*0000000000000000 address 0 clock))))
+
+(defun rom-filler ()
+  (loop for address below (ash 1 15)
+        collect (integer-to-bus address 16)))
+
+(defparameter *test-rom* (make-rom32k (rom-filler)))
+
+(defun test-rom ()
+  (dotimes (address (ash 1 15))
+    (test (funcall *test-rom* (integer-to-bus address 15) 0)
+          (integer-to-bus address 16))))
+
+(test-rom)
+
+; screen is 8k ram at address 16384 in 32K ram
+; keyboard is register at address 24576 in 32K ram
+
+;====================================================================
+
+(defun make-computer (prog-list)
+  (let ((cpu (make-cpu))
+        (ram (make-ram32k))
+        (rom (make-rom32k prog-list))
+        (inM #*0000000000000000)
+        (instruction #*0000000000000000))
+    (lambda (reset clock)
+      (wire (((outM writeM addressM pc)
+               (funcall cpu inM instruction reset clock))
+              (ram-out (funcall ram outM addressM writeM clock))
+              (rom-out (funcall rom pc clock)))
+            ; update wires
+            (setf inM ram-out)
+            (setf instruction rom-out)
+            (values ram pc)))))
+
+;--------------------------------------------------------------------
+
+(defun test-computer
+    (computer n-cycles end-pc ram-addresses ram-values)
+  "Run up to N-CYCLES after reset.
+  RAM addresses and values are integers or lists of integers."
+  (let ((end-address (integer-to-bus end-pc 15))
+        (addresses (if (listp ram-addresses)
+                       ram-addresses
+                       (list ram-addresses)))
+        (values (if (listp ram-values)
+                    ram-values
+                    (list ram-values))))
+    (assert (= (length addresses) (length values)))
+    (funcall computer 1 0)
+    (funcall computer 1 1) ; reset
+    (let ((ram
+            (loop
+              repeat (* 2 n-cycles)
+              for clock = 0 then (not clock)
+              for (ram pc) = (multiple-value-list
+                              (funcall computer 0 clock))
+              when (cl:and (= clock 1) (equal pc end-address))
+                return ram
+              finally
+                (error
+                 "Computer did not reach ROM[~D] within ~D cycles."
+                 end-pc n-cycles))))
+      (loop for address in addresses
+            for value in values
+            do (test (funcall ram #*0000000000000000
+                              (integer-to-bus address 15) 0 0)
+                     (integer-to-bus value 16))))))
+
+(defun test-program (prog-list n-cycles end-pc ram-addresses ram-values)
+  (test-computer (make-computer prog-list) n-cycles end-pc ram-addresses ram-values))
+
+;--------------------------------------------------------------------
+
+(defparameter *sum-1-to-100-program*
+  (list #*0000000000010000 ; @i (RAM[16])
+        #*1110111111001000 ; M=1
+        #*0000000000010001 ; @sum (RAM[17])
+        #*1110101010001000 ; M=0
+        #*0000000000010000 ; @i (LOOP, ROM[4])
+        #*1111110000010000 ; D=M
+        #*0000000001100100 ; @100
+        #*1110010011010000 ; D=D-A
+        #*0000000000010010 ; @END
+        #*1110001100000001 ; D;JGT
+        #*0000000000010000 ; @i
+        #*1111110000010000 ; D=M
+        #*0000000000010001 ; @sum
+        #*1111000010001000 ; M=D+M
+        #*0000000000010000 ; @i
+        #*1111110111001000 ; M=M+1
+        #*0000000000000100 ; @LOOP
+        #*1110101010000111 ; 0;JMP
+        #*0000000000010010 ; @END (END, ROM[18])
+        #*1110101010000111)) ; 0;JMP
+
+(defparameter *sum-1-to-100-computer*
+  (make-computer *sum-1-to-100-program*))
+
+(defun test-sum-1-to-100 ()
+  (test-computer *sum-1-to-100-computer* 2000 18 17 5050))
+
+(time (test-sum-1-to-100))
+
+;====================================================================
