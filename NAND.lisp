@@ -1165,8 +1165,18 @@
                               (integer-to-bus address 15) 0 0)
                      (integer-to-bus value 16))))))
 
+(defparameter *test-computer* nil)
+
+(defun make-test-computer (prog-list)
+  (when *test-computer*
+    (setf *test-computer* nil)
+    ;; Reclaim the old computer before allocating two new banks.
+    #+sbcl (sb-ext:gc :full t))
+  (setf *test-computer* (make-computer prog-list)))
+
 (defun test-program (prog-list n-cycles end-pc ram-addresses ram-values)
-  (test-computer (make-computer prog-list) n-cycles end-pc ram-addresses ram-values))
+  (test-computer (make-test-computer prog-list)
+                 n-cycles end-pc ram-addresses ram-values))
 
 ;--------------------------------------------------------------------
 
@@ -1192,12 +1202,71 @@
         #*0000000000010010 ; @END (END, ROM[18])
         #*1110101010000111)) ; 0;JMP
 
-(defparameter *sum-1-to-100-computer*
-  (make-computer *sum-1-to-100-program*))
-
 (defun test-sum-1-to-100 ()
-  (test-computer *sum-1-to-100-computer* 2000 18 17 5050))
+  (test-program *sum-1-to-100-program* 2000 18 17 5050))
 
 (time (test-sum-1-to-100))
 
+;--------------------------------------------------------------------
+
+(defparameter *add-program*
+  (list #*0000000000000010 ; @2
+        #*1110110000010000 ; D=A
+        #*0000000000000011 ; @3
+        #*1110000010010000 ; D=D+A
+        #*0000000000000000 ; @R0
+        #*1110001100001000)) ; M=D
+
+(defparameter *max-program*
+  (list #*0000000000000000 ; @R0
+        #*1111110000010000 ; D=M
+        #*0000000000000001 ; @R1
+        #*1111010011010000 ; D=D-M
+        #*0000000000001010 ; @FIRST
+        #*1110001100000001 ; D;JGT
+        #*0000000000000001 ; @R1
+        #*1111110000010000 ; D=M
+        #*0000000000001100 ; @STORE
+        #*1110101010000111 ; 0;JMP
+        #*0000000000000000 ; @R0 (FIRST, ROM[10])
+        #*1111110000010000 ; D=M
+        #*0000000000000010 ; @R2 (STORE, ROM[12])
+        #*1110001100001000 ; M=D
+        #*0000000000001110 ; @END (END, ROM[14])
+        #*1110101010000111)) ; 0;JMP
+
+(defun set-computer-test-ram (computer words)
+  (let ((ram (funcall computer 1 0)))
+    (loop for value in words
+          for i from 0
+          for address = (integer-to-bus i 15)
+          for word = (integer-to-bus value 16)
+          do (funcall ram word address 1 0)
+             (funcall ram word address 1 1))))
+
+(defun test-computer-add ()
+  (let ((computer (make-test-computer *add-program*)))
+    (test-computer computer 6 6 0 5)
+    (set-computer-test-ram computer '(0))
+    (test-computer computer 6 6 0 5)))
+
+(defun test-computer-max ()
+  (let ((computer (make-test-computer *max-program*)))
+    (set-computer-test-ram computer '(3 5))
+    (test-computer computer 14 14 '(0 1 2) '(3 5 5))
+    (set-computer-test-ram computer '(23456 12345))
+    (test-computer computer 10 14 '(0 1 2) '(23456 12345 23456))))
+
+(test-computer-add)
+(test-computer-max)
+
 ;====================================================================
+
+#|
+; load using
+(time 
+    (progn (load "~/jects/nand2tetris/NAND.lisp" :print t)
+           (in-package :nand2tetris)))
+|#
+
+:end
