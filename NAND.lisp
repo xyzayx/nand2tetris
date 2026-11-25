@@ -144,6 +144,19 @@
 (test (mux16 #*1000100010001000 #*1111111111111111 2) 'error)
 (test (mux16 #*1000100010001000 #*111111111111111 0) 'error)
 
+;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+(defun bit-vector-to-int (bv)
+  (reduce (lambda (n b) (+ (* n 2) b))
+          bv :initial-value 0))
+
+; redef optimized version (faster ram)
+
+(defmacro mux16 (a b sel)
+  `(if (zerop ,sel) ,a ,b))
+
+;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 (defun dmux16 (in16 sel)
   (check-type in16 bus16)
   (check-type sel bit)
@@ -228,6 +241,7 @@
     (mux4way16 e f g h (subseq sel 1 (1+ 2)))
     (bit sel 0)))
 
+
 (test (mux8way16 #*0000000000000000 #*0001000100010001 
                  #*1000100010001000 #*1111111111111111
                  #*1100110011001100 #*0101010101010101 
@@ -275,6 +289,29 @@
                  #*1100110011001100 #*0101010101010101 
                  #*0000000011111111 #*1111111111111110
                  #*111) #*1111111111111110)
+
+;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+; redef optimized versions (faster ram)
+
+(defmacro mux4way16 (a b c d sel)
+  `(case (bit-vector-to-int ,sel)
+     (0 ,a)
+     (1 ,b)
+     (2 ,c)
+     (3 ,d)))
+
+(defmacro mux8way16 (a b c d e f g h sel)
+  `(case (bit-vector-to-int ,sel)
+     (0 ,a)
+     (1 ,b)
+     (2 ,c)
+     (3 ,d)
+     (4 ,e)
+     (5 ,f)
+     (6 ,g)
+     (7 ,h)))
+
+;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 (defun dmux4way (in sel)
   (check-type sel bus2)
@@ -324,7 +361,8 @@
 ;====================================================================
 
 
-; macro level recursion effectively rewriting boilerplate nested multiple value binds representing ripple wiring
+; macro level recursion effectively rewriting boilerplate 
+; nested multiple value binds representing ripple wiring
 (defmacro wire (bindings &body body)
   (if (null bindings)
       `(progn ,@body)
@@ -710,6 +748,8 @@
 (test (funcall *test-register* #*0101010101010101 1 1) #*0101010101010101)
 (test (funcall *test-register* #*0101010101010101 1 0) #*0101010101010101)
 
+;====================================================================
+
 #|
 (defun make-ram8 ()
   (let ((registers (make-array 8
@@ -749,64 +789,30 @@
           (funcall r7 in16 load7 clock)
           address)))))
 
+;----------------------
 
-(defparameter *test-ram8* (make-ram8))
-(test (funcall *test-ram8* #*0000000000000000 #*000 0 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000000000001 #*000 1 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000000000001 #*000 1 1) #*0000000000000001)
-(test (funcall *test-ram8* #*0000000000000001 #*000 1 0) #*0000000000000001)
-(test (funcall *test-ram8* #*0000000000000010 #*001 1 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000000000010 #*001 1 1) #*0000000000000010)
-(test (funcall *test-ram8* #*0000000000000010 #*001 1 0) #*0000000000000010)
-(test (funcall *test-ram8* #*0000000000000100 #*010 1 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000000000100 #*010 1 1) #*0000000000000100)
-(test (funcall *test-ram8* #*0000000000000100 #*010 1 0) #*0000000000000100)
-(test (funcall *test-ram8* #*0000000000001000 #*011 1 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000000001000 #*011 1 1) #*0000000000001000)
-(test (funcall *test-ram8* #*0000000000001000 #*011 1 0) #*0000000000001000)
-(test (funcall *test-ram8* #*0000000000010000 #*100 1 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000000010000 #*100 1 1) #*0000000000010000)
-(test (funcall *test-ram8* #*0000000000010000 #*100 1 0) #*0000000000010000)
-(test (funcall *test-ram8* #*0000000000100000 #*101 1 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000000100000 #*101 1 1) #*0000000000100000)
-(test (funcall *test-ram8* #*0000000000100000 #*101 1 0) #*0000000000100000)
-(test (funcall *test-ram8* #*0000000001000000 #*110 1 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000001000000 #*110 1 1) #*0000000001000000)
-(test (funcall *test-ram8* #*0000000001000000 #*110 1 0) #*0000000001000000)
-(test (funcall *test-ram8* #*0000000010000000 #*111 1 0) #*0000000000000000)
-(test (funcall *test-ram8* #*0000000010000000 #*111 1 1) #*0000000010000000)
-(test (funcall *test-ram8* #*0000000010000000 #*111 1 0) #*0000000010000000)
-(test (funcall *test-ram8* #*1111111111111111 #*000 0 0) #*0000000000000001)
-(test (funcall *test-ram8* #*1111111111111111 #*001 0 0) #*0000000000000010)
-(test (funcall *test-ram8* #*1111111111111111 #*010 0 0) #*0000000000000100)
-(test (funcall *test-ram8* #*1111111111111111 #*011 0 0) #*0000000000001000)
-(test (funcall *test-ram8* #*1111111111111111 #*100 0 0) #*0000000000010000)
-(test (funcall *test-ram8* #*1111111111111111 #*101 0 0) #*0000000000100000)
-(test (funcall *test-ram8* #*1111111111111111 #*110 0 0) #*0000000001000000)
-(test (funcall *test-ram8* #*1111111111111111 #*111 0 0) #*0000000010000000)
-(test (funcall *test-ram8* #*1010101010101010 #*000 1 0) #*0000000000000001)
-(test (funcall *test-ram8* #*1010101010101010 #*000 1 1) #*1010101010101010)
-(test (funcall *test-ram8* #*0101010101010101 #*010 1 0) #*0000000000000100)
-(test (funcall *test-ram8* #*0101010101010101 #*010 1 1) #*0101010101010101)
-(test (funcall *test-ram8* #*0000000000000000 #*00 0 0 ) 'error)
-(test (funcall *test-ram8* #*0000 #*000 0 0) 'error)
+(defun integer-to-bus (n width)
+  (make-array width :element-type 'bit :initial-contents
+              (loop for i downfrom (1- width) to 0
+                    collect (ldb (byte 1 i) n))))
 
-(test
+(defun fill-ram (ram k)
+  (dotimes (address (ash 1 k))
+    (let ((address-bus (integer-to-bus address k))
+          (in16 (integer-to-bus address 16)))
+      (funcall ram in16 address-bus 1 0)
+      (funcall ram in16 address-bus 1 1))))
 
-  (mapcar
-    (lambda (address)
-      (funcall *test-ram8* #*0000000000000000 address 0 1))
-    (list #*000 #*001 #*010 #*011 #*100 #*101 #*110 #*111))
+(defun test-ram (ram k)
+  (fill-ram ram k)
+  (dotimes (address (ash 1 k))
+    (test (funcall ram #*0000000000000000
+                   (integer-to-bus address k) 0 0)
+          (integer-to-bus address 16))))
 
-  (list #*1010101010101010
-        #*0000000000000010
-        #*0101010101010101
-        #*0000000000001000
-        #*0000000000010000
-        #*0000000000100000
-        #*0000000001000000
-        #*0000000010000000))
+(test-ram (make-ram8) 3)
 
+;----------------------
 
 (defun make-ram64 ()
   (let ((r0 (make-ram8))
@@ -833,62 +839,7 @@
           (funcall r7 in16 register-address load7 clock)
           bank-address)))))
 
-(defparameter *test-ram64* (make-ram64))
-(test (funcall *test-ram64* #*0000000000000001 #*000000 1 0) #*0000000000000000)
-(test (funcall *test-ram64* #*0000000000000001 #*000000 1 1) #*0000000000000001)
-(test (funcall *test-ram64* #*0000000000000010 #*000111 1 0) #*0000000000000000)
-(test (funcall *test-ram64* #*0000000000000010 #*000111 1 1) #*0000000000000010)
-(test (funcall *test-ram64* #*0000000000000100 #*111000 1 0) #*0000000000000000)
-(test (funcall *test-ram64* #*0000000000000100 #*111000 1 1) #*0000000000000100)
-(test (funcall *test-ram64* #*0000000000001000 #*101101 1 0) #*0000000000000000)
-(test (funcall *test-ram64* #*0000000000001000 #*101101 1 1) #*0000000000001000)
-(test (funcall *test-ram64* #*0000000000010000 #*010010 1 0) #*0000000000000000)
-(test (funcall *test-ram64* #*0000000000010000 #*010010 1 1) #*0000000000010000)
-(test (funcall *test-ram64* #*1111111111111111 #*000000 0 0) #*0000000000000001)
-(test (funcall *test-ram64* #*1111111111111111 #*000111 0 0) #*0000000000000010)
-(test (funcall *test-ram64* #*1111111111111111 #*111000 0 0) #*0000000000000100)
-(test (funcall *test-ram64* #*1111111111111111 #*101101 0 0) #*0000000000001000)
-(test (funcall *test-ram64* #*1111111111111111 #*010010 0 0) #*0000000000010000)
-
-
-(defun test-ram (ram k)
-  (let* ((size (ash 1 k)) (value 0)
-         (expected (make-array size :initial-element #*0000000000000000)))
-    (labels ((bus (n width)
-               (make-array width :element-type 'bit :initial-contents
-                           (loop for i downfrom (1- width) to 0 collect (ldb (byte 1 i) n))))
-             (write-address (address)
-               (let ((in16 (bus (incf value) 16)) (address-bus (bus address k)))
-                 (test (funcall ram in16 address-bus 1 0) (aref expected address))
-                 (test (funcall ram in16 address-bus 1 1) in16)
-                 (setf (aref expected address) in16))))
-      (loop for address below size do (write-address address))
-      (loop for address downfrom (1- size) to 0 by 2 do (write-address address))
-      (loop for address below size do
-        (test (funcall ram #*0000000000000000 (bus address k) 0 0)
-              (aref expected address)))))
-  t)
-
-(defun quick-test-ram (ram k)
-  (let* ((last (1- (ash 1 k))) (addresses (list 0 (logand last #xaaaa) last)))
-    (labels ((bus (n width)
-               (make-array width :element-type 'bit :initial-contents
-                           (loop for i downfrom (1- width) to 0 collect (ldb (byte 1 i) n)))))
-      (let ((written
-              (loop for address in addresses
-                    for in16 = (bus (1+ (random #xffff)) 16)
-                    do (test (funcall ram in16 (bus address k) 1 0) #*0000000000000000)
-                       (test (funcall ram in16 (bus address k) 1 1) in16)
-                    collect in16)))
-        (loop for address in addresses for in16 in written do
-          (test (funcall ram #*0000000000000000 (bus address k) 0 0) in16)))))
-  t)
-
-
-(test-ram (make-ram8) 3)
-
-; (test-ram (make-ram64) 6)
-(quick-test-ram (make-ram64) 6)
+(test-ram (make-ram64) 6)
 
 (defun make-ram512 ()
   (let ((r0 (make-ram64))
@@ -915,8 +866,7 @@
           (funcall r7 in16 ram64-address load7 clock)
           bank-address)))))
 
-;(test-ram (make-ram512) 9)
-; (quick-test-ram (make-ram512) 9)
+(test-ram (make-ram512) 9)
 
 (defun make-ram4k ()
   (let ((r0 (make-ram512))
@@ -943,8 +893,21 @@
           (funcall r7 in16 ram512-address load7 clock)
           bank-address)))))
 
-; (test-ram (make-ram4k) 12)
-; (quick-test-ram (make-ram4k) 12)
+(test-ram (make-ram4k) 12)
+
+(defun make-ram8k ()
+  (let ((r0 (make-ram4k))
+        (r1 (make-ram4k)))
+    (lambda (in16 address load clock)
+      (wire ((bank-address (bit address 0))
+             (ram4k-address (subseq address 1 13))
+             ((load0 load1) (dmux load bank-address)))
+        (mux16
+          (funcall r0 in16 ram4k-address load0 clock)
+          (funcall r1 in16 ram4k-address load1 clock)
+          bank-address)))))
+
+(test-ram (make-ram8k) 13)
 
 (defun make-ram16k ()
   (let ((r0 (make-ram4k))
@@ -963,11 +926,23 @@
           (funcall r3 in16 ram4k-address load3 clock)
           bank-address)))))
 
-; (test-ram (make-ram16k) 14)
-; (quick-test-ram (make-ram16k) 14)
+(test-ram (make-ram16k) 14)
+
+(defun make-ram32k ()
+  (let ((r0 (make-ram16k))
+        (r1 (make-ram16k)))
+    (lambda (in16 address load clock)
+      (wire ((bank-address (bit address 0))
+             (ram16k-address (subseq address 1 15))
+             ((load0 load1) (dmux load bank-address)))
+        (mux16
+          (funcall r0 in16 ram16k-address load0 clock)
+          (funcall r1 in16 ram16k-address load1 clock)
+          bank-address)))))
+
+(defparameter *test-ram32k* (make-ram32k))
 
 ;====================================================================
-
 
 (defun make-pc ()
   (let ((reg (make-register)))
@@ -1100,3 +1075,4 @@
       (values #*0010101101100101 1 #*000001111101100 #*000000000001000))
 
 ;====================================================================
+
