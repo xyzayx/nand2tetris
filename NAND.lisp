@@ -26,10 +26,14 @@
                                         (typep c (first want)))
                             (return-from test (type-of c))))))
          (let ((got (multiple-value-list ,expr)))
-           (assert (cl:and (= (length got) (length want))
-                           (every (lambda (g w)
-                                    (cl:or (eq w :any) (equal g w)))
-                                  got want)))
+           (assert 
+             (cl:and 
+               (= (length got) (length want))
+               (every 
+                 (lambda (g w)
+                    (cl:or (eq w :any) 
+                           (if (numberp w) (eq g w) (equalp g w))))
+                  got want)))
            (values-list got))))))
 
 ;====================================================================
@@ -1123,7 +1127,7 @@
          :element-type '(unsigned-byte 8) options))
 
 (defparameter screen
-  (open-device-file "screen.bin" :direction :output
+  (open-device-file "screen.bin" :direction :io
                    :if-exists :overwrite :if-does-not-exist :create))
 
 (defparameter keyboard
@@ -1189,8 +1193,7 @@
         (setf instruction rom-out)
         (values ram pc)))))
 
-(defun run-computer (computer n-cycles
-                     &key end-pc (fps 20) (keyboard-poll-ms 100))
+(defun run-computer (computer n-cycles end-pc &key (fps 1) (keyboard-poll-ms 100))
   (check-type fps (real (0)))
   (check-type keyboard-poll-ms (real (0)))
   (let ((end-address (when end-pc (integer-to-bus end-pc 15)))
@@ -1209,31 +1212,16 @@
           (when (equal pc end-address) (return))
           (do-at-interval frame-ms (now next-write)
             (write-screen-to-file screen ram))))
-      (values ram pc (write-screen-to-file screen ram)))))
+      (values ram pc))))
 
 ;====================================================================
 
-(defun test-computer
-    (computer n-cycles end-pc ram-addresses ram-values)
-  "RAM addresses and values are integers or lists of integers."
-  (let ((addresses (if (listp ram-addresses)
-                       ram-addresses
-                       (list ram-addresses)))
-        (values (if (listp ram-values)
-                    ram-values
-                    (list ram-values))))
-    (assert (= (length addresses) (length values)))
-    (wire (((ram pc frame)
-            (run-computer computer n-cycles :end-pc end-pc
-                          :fps 1 :keyboard-poll-ms 10000)))
-      (unless (= (bit-vector-to-int pc) end-pc)
-        (error "Computer did not reach ROM[~D] within ~D cycles."
-               end-pc n-cycles))
-      (loop for address in addresses
-            for value in values
-            do (test (read-word-from-ram ram address)
-                     (integer-to-bus value 16)))
-      frame)))
+(defun test-screen-frame (ram-reader expected-frame)
+  (write-screen-to-file screen ram-reader)
+  (file-position screen 0)
+  (let ((actual (make-array #x4000 :element-type '(unsigned-byte 8))))
+    (test (read-sequence actual screen) #x4000)
+    (test actual expected-frame)))
 
 (defparameter *test-computer* nil)
 
@@ -1243,17 +1231,27 @@
     #+sbcl (sb-ext:gc :full t))
   (setf *test-computer* (make-computer prog-list)))
 
+(defun test-ended-with (pc end-pc)
+  (test (bit-vector-to-int pc) end-pc))
+
+(defun test-ram-words (ram addresses ram-values)
+  (flet ((as-list (value) (if (listp value) value (list value))))
+    (let ((actual
+            (map 'vector
+                 (lambda (address) (read-word-from-ram ram address))
+                 (as-list addresses)))
+          (expected
+            (map 'vector
+                 (lambda (value) (integer-to-bus value 16))
+                 (as-list ram-values))))
+      (test actual expected))))
+
 (defun set-computer-test-ram (computer words)
   (let ((ram (funcall computer 1 0)))
     (loop for value in words
           for i from 0
-          do (write-word-to-ram ram i (integer-to-bus value 16)))))
-
-(defun test-program (prog-list n-cycles end-pc ram-addresses ram-values
-                     &key initial-ram)
-  (let ((computer (make-test-computer prog-list)))
-    (when initial-ram (set-computer-test-ram computer initial-ram))
-    (test-computer computer n-cycles end-pc ram-addresses ram-values)))
+          do (write-word-to-ram
+              ram i (integer-to-bus value 16)))))
 
 ;--------------------------------------------------------------------
 
@@ -1280,7 +1278,12 @@
         #*1110101010000111)) ; 0;JMP
 
 (defun test-sum-1-to-100 ()
-  (test-program *sum-1-to-100-program* 2000 18 17 5050))
+  (let ((computer
+          (make-test-computer *sum-1-to-100-program*)))
+    (wire (((ram pc)
+            (run-computer computer 2000 18)))
+      (test-ended-with pc 18)
+      (test-ram-words ram 17 5050))))
 
 (test-sum-1-to-100)
 
@@ -1341,36 +1344,65 @@
 
 (defun test-computer-add ()
   (let ((computer (make-test-computer *add-program*)))
-    (test-computer computer 6 6 0 5)
+    (wire (((ram pc)
+            (run-computer computer 6 6)))
+      (test-ended-with pc 6)
+      (test-ram-words ram 0 5))
+
     (set-computer-test-ram computer '(0))
-    (test-computer computer 6 6 0 5)))
+
+    (wire (((ram pc)
+            (run-computer computer 6 6)))
+      (test-ended-with pc 6)
+      (test-ram-words ram 0 5))))
 
 (defun test-computer-max ()
   (let ((computer (make-test-computer *max-program*)))
     (set-computer-test-ram computer '(3 5))
-    (test-computer computer 14 14 '(0 1 2) '(3 5 5))
-    (set-computer-test-ram computer '(23456 12345))
-    (test-computer computer 10 14 '(0 1 2) '(23456 12345 23456))))
 
-(defun test-screen-frame (frame rect-addresses)
-  (test (length frame) #x4000)
-  (loop for address from #x4000 below #x6000
-        for i from 0 by 2
-        for byte = (if (member address rect-addresses) #xff 0)
-        do (test (values (aref frame i) (aref frame (1+ i)))
-                 (values byte byte))))
+    (wire (((ram pc)
+            (run-computer computer 14 14)))
+      (test-ended-with pc 14)
+      (test-ram-words ram
+                      '(0 1 2)
+                      '(3 5 5)))
+
+    (set-computer-test-ram computer '(23456 12345))
+
+    (wire (((ram pc)
+            (run-computer computer 10 14)))
+      (test-ended-with pc 14)
+      (test-ram-words ram
+                      '(0 1 2)
+                      '(23456 12345 23456)))))
+
+(defun make-rect-test-program (height)
+  (list* (integer-to-bus height 16)
+         #*1110110000010000 ; D=A
+         (cddr *rect-program*)))
+
+(defun make-rect-frame (height)
+  (let ((frame (make-array #x4000 :element-type '(unsigned-byte 8)
+                                  :initial-element 0)))
+    (dotimes (row height frame)
+      (let ((i (* row #x40)))
+        (setf (aref frame i) #xff
+              (aref frame (1+ i)) #xff)))))
 
 (defun test-computer-rect ()
-  (let ((rows '(#x4000 #x4020 #x4040 #x4060)))
-    (test-screen-frame
-     (test-program *rect-program* 63 24 rows
-                   '(#xffff #xffff #xffff #xffff) :initial-ram '(4))
-     rows)))
+  (let ((computer
+          (make-test-computer
+           (make-rect-test-program 4)))
+        (frame (make-rect-frame 4)))
+    (wire (((ram pc)
+            (run-computer computer 63 24)))
+      (test-ended-with pc 24)
+      (test-screen-frame ram frame)
+      t)))
 
 (test-computer-add)
 (test-computer-max)
 (test-computer-rect)
-
 ;====================================================================
 
 (close-devices screen keyboard)
