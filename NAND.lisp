@@ -1110,10 +1110,68 @@
 
 (test-rom)
 
-; screen is 8k ram at address 16384 in 32K ram
-; keyboard is register at address 24576 in 32K ram
-
 ;====================================================================
+
+(defparameter *computer-directory*
+  #.(make-pathname :name nil :type nil
+                   :defaults (cl:or *compile-file-truename*
+                                    *load-truename*
+                                    *default-pathname-defaults*)))
+
+(defun open-device-file (name &rest options)
+  (apply #'open (merge-pathnames name *computer-directory*)
+         :element-type '(unsigned-byte 8) options))
+
+(defparameter screen
+  (open-device-file "screen.bin" :direction :output
+                   :if-exists :overwrite :if-does-not-exist :create))
+
+(defparameter keyboard
+  (open-device-file "keyboard.bin" :if-does-not-exist :create))
+
+(defun close-devices (&rest device-fds)
+  (dolist (fd device-fds) (close fd)))
+
+(defun fps-to-ms (fps) (/ 1000 fps))
+
+(defmacro do-at-interval (ms (now next) &body body)
+  (let ((tick (gensym)) (units internal-time-units-per-second))
+    `(let ((,tick ,now))
+       (when (>= ,tick ,next)
+         ,@body
+         (setf ,next (+ ,tick (ceiling (* ,ms ,units) 1000)))))))
+
+;--------------------------------------------------------------------
+
+(defun read-keyboard-from-file (stream)
+  (file-position stream 0)
+  (let ((low (read-byte stream nil 0))
+        (high (read-byte stream nil 0)))
+    (integer-to-bus (logior low (ash high 8)) 16)))
+
+(defun read-word-from-ram (ram address)
+  (funcall ram #*0000000000000000 (integer-to-bus address 15) 0 1))
+
+(defun write-word-to-ram (ram address word)
+  (let ((bus (integer-to-bus address 15)))
+    (funcall ram word bus 1 0)
+    (funcall ram word bus 1 1)))
+
+; screen is 8k ram at address 16384 in 32K ram
+(defun write-screen-to-file (stream ram)
+  (let ((frame (make-array #x4000 :element-type '(unsigned-byte 8))))
+    (loop for address from #x4000 below #x6000
+          for i from 0 by 2
+          for word = (bit-vector-to-int
+                      (read-word-from-ram ram address))
+          do (setf (aref frame i) (ldb (byte 8 0) word)
+                   (aref frame (1+ i)) (ldb (byte 8 8) word)))
+    (file-position stream 0)
+    (write-sequence frame stream)
+    (finish-output stream)
+    frame))
+
+;--------------------------------------------------------------------
 
 (defun make-computer (prog-list)
   (let ((cpu (make-cpu))
@@ -1124,59 +1182,78 @@
     (lambda (reset clock)
       (wire (((outM writeM addressM pc)
                (funcall cpu inM instruction reset clock))
-              (ram-out (funcall ram outM addressM writeM clock))
-              (rom-out (funcall rom pc clock)))
-            ; update wires
-            (setf inM ram-out)
-            (setf instruction rom-out)
-            (values ram pc)))))
+             (ram-out (funcall ram outM addressM writeM clock))
+             (rom-out (funcall rom pc clock)))
+        ; update wires
+        (setf inM ram-out)
+        (setf instruction rom-out)
+        (values ram pc)))))
 
-;--------------------------------------------------------------------
+(defun run-computer (computer n-cycles
+                     &key end-pc (fps 20) (keyboard-poll-ms 100))
+  (check-type fps (real (0)))
+  (check-type keyboard-poll-ms (real (0)))
+  (let ((end-address (when end-pc (integer-to-bus end-pc 15)))
+        (frame-ms (fps-to-ms fps))
+        (next-poll 0)
+        (next-write 0))
+    (funcall computer 1 0)
+    (wire (((ram pc) (funcall computer 1 1)))
+      (dotimes (cycle n-cycles)
+        (let ((now (get-internal-real-time)))
+          (do-at-interval keyboard-poll-ms (now next-poll)
+            (write-word-to-ram ram #x6000
+                              (read-keyboard-from-file keyboard)))
+          (funcall computer 0 0)
+          (setf pc (nth-value 1 (funcall computer 0 1)))
+          (when (equal pc end-address) (return))
+          (do-at-interval frame-ms (now next-write)
+            (write-screen-to-file screen ram))))
+      (values ram pc (write-screen-to-file screen ram)))))
+
+;====================================================================
 
 (defun test-computer
     (computer n-cycles end-pc ram-addresses ram-values)
-  "Run up to N-CYCLES after reset.
-  RAM addresses and values are integers or lists of integers."
-  (let ((end-address (integer-to-bus end-pc 15))
-        (addresses (if (listp ram-addresses)
+  "RAM addresses and values are integers or lists of integers."
+  (let ((addresses (if (listp ram-addresses)
                        ram-addresses
                        (list ram-addresses)))
         (values (if (listp ram-values)
                     ram-values
                     (list ram-values))))
     (assert (= (length addresses) (length values)))
-    (funcall computer 1 0)
-    (funcall computer 1 1) ; reset
-    (let ((ram
-            (loop
-              repeat (* 2 n-cycles)
-              for clock = 0 then (not clock)
-              for (ram pc) = (multiple-value-list
-                              (funcall computer 0 clock))
-              when (cl:and (= clock 1) (equal pc end-address))
-                return ram
-              finally
-                (error
-                 "Computer did not reach ROM[~D] within ~D cycles."
-                 end-pc n-cycles))))
+    (wire (((ram pc frame)
+            (run-computer computer n-cycles :end-pc end-pc
+                          :fps 1 :keyboard-poll-ms 10000)))
+      (unless (= (bit-vector-to-int pc) end-pc)
+        (error "Computer did not reach ROM[~D] within ~D cycles."
+               end-pc n-cycles))
       (loop for address in addresses
             for value in values
-            do (test (funcall ram #*0000000000000000
-                              (integer-to-bus address 15) 0 0)
-                     (integer-to-bus value 16))))))
+            do (test (read-word-from-ram ram address)
+                     (integer-to-bus value 16)))
+      frame)))
 
 (defparameter *test-computer* nil)
 
 (defun make-test-computer (prog-list)
   (when *test-computer*
     (setf *test-computer* nil)
-    ;; Reclaim the old computer before allocating two new banks.
     #+sbcl (sb-ext:gc :full t))
   (setf *test-computer* (make-computer prog-list)))
 
-(defun test-program (prog-list n-cycles end-pc ram-addresses ram-values)
-  (test-computer (make-test-computer prog-list)
-                 n-cycles end-pc ram-addresses ram-values))
+(defun set-computer-test-ram (computer words)
+  (let ((ram (funcall computer 1 0)))
+    (loop for value in words
+          for i from 0
+          do (write-word-to-ram ram i (integer-to-bus value 16)))))
+
+(defun test-program (prog-list n-cycles end-pc ram-addresses ram-values
+                     &key initial-ram)
+  (let ((computer (make-test-computer prog-list)))
+    (when initial-ram (set-computer-test-ram computer initial-ram))
+    (test-computer computer n-cycles end-pc ram-addresses ram-values)))
 
 ;--------------------------------------------------------------------
 
@@ -1205,7 +1282,7 @@
 (defun test-sum-1-to-100 ()
   (test-program *sum-1-to-100-program* 2000 18 17 5050))
 
-(time (test-sum-1-to-100))
+(test-sum-1-to-100)
 
 ;--------------------------------------------------------------------
 
@@ -1235,14 +1312,32 @@
         #*0000000000001110 ; @END (END, ROM[14])
         #*1110101010000111)) ; 0;JMP
 
-(defun set-computer-test-ram (computer words)
-  (let ((ram (funcall computer 1 0)))
-    (loop for value in words
-          for i from 0
-          for address = (integer-to-bus i 15)
-          for word = (integer-to-bus value 16)
-          do (funcall ram word address 1 0)
-             (funcall ram word address 1 1))))
+(defparameter *rect-program*
+  (list #*0000000000000000 ; @R0 ; height
+        #*1111110000010000 ; D=M
+        #*0000000000010111 ; @END
+        #*1110001100000110 ; D;JLE
+        #*0000000000010000 ; @rows
+        #*1110001100001000 ; M=D
+        #*0100000000000000 ; @SCREEN
+        #*1110110000010000 ; D=A
+        #*0000000000010001 ; @address
+        #*1110001100001000 ; M=D
+        #*0000000000010001 ; @address (LOOP, ROM[10])
+        #*1111110000100000 ; A=M
+        #*1110111010001000 ; M=-1
+        #*0000000000010001 ; @address
+        #*1111110000010000 ; D=M
+        #*0000000000100000 ; @32
+        #*1110000010010000 ; D=D+A
+        #*0000000000010001 ; @address
+        #*1110001100001000 ; M=D
+        #*0000000000010000 ; @rows
+        #*1111110010011000 ; MD=M-1
+        #*0000000000001010 ; @LOOP
+        #*1110001100000001 ; D;JGT
+        #*0000000000010111 ; @END (END, ROM[23])
+        #*1110101010000111)) ; 0;JMP
 
 (defun test-computer-add ()
   (let ((computer (make-test-computer *add-program*)))
@@ -1257,15 +1352,34 @@
     (set-computer-test-ram computer '(23456 12345))
     (test-computer computer 10 14 '(0 1 2) '(23456 12345 23456))))
 
+(defun test-screen-frame (frame rect-addresses)
+  (test (length frame) #x4000)
+  (loop for address from #x4000 below #x6000
+        for i from 0 by 2
+        for byte = (if (member address rect-addresses) #xff 0)
+        do (test (values (aref frame i) (aref frame (1+ i)))
+                 (values byte byte))))
+
+(defun test-computer-rect ()
+  (let ((rows '(#x4000 #x4020 #x4040 #x4060)))
+    (test-screen-frame
+     (test-program *rect-program* 63 24 rows
+                   '(#xffff #xffff #xffff #xffff) :initial-ram '(4))
+     rows)))
+
 (test-computer-add)
 (test-computer-max)
+(test-computer-rect)
 
 ;====================================================================
+
+(close-devices screen keyboard)
+; recreate screen keyboard params above for further testing after load
 
 #|
 ; load using
 (time 
-    (progn (load "~/jects/nand2tetris/NAND.lisp" :print t)
+    (progn (load "NAND.lisp" :print t)
            (in-package :nand2tetris)))
 |#
 
