@@ -7,15 +7,19 @@
 #+sbcl
 (setf (sb-ext:bytes-consed-between-gcs) (* 512 1024 1024))
 
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 (defpackage :nand2tetris
   (:use :cl)
-  (:shadow :not :and :or :any))
+  (:shadow :not :and :or :____))
 
 (in-package :nand2tetris)
 
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+
+(defun test-predicate (a b)
+  (cl:or (if (numberp b) (eq a b) (equalp a b))
+         (eq :____ b)))
 
 (defmacro test (expr expected)
   `(block test
@@ -26,17 +30,14 @@
                                         (typep c (first want)))
                             (return-from test (type-of c))))))
          (let ((got (multiple-value-list ,expr)))
-           (assert 
-             (cl:and 
-               (= (length got) (length want))
-               (every 
-                 (lambda (g w)
-                    (cl:or (eq w :any) 
-                           (if (numberp w) (eq g w) (equalp g w))))
-                  got want)))
+           (assert (every #'test-predicate got want))
            (values-list got))))))
 
-;====================================================================
+(macroexpand '(test (list 0 1) :____))
+(test ((lambda () (values 0 1))) (values 0 1))
+(macroexpand '(test ((lambda () (values 0 1))) (values 0 1)))
+
+;===============================================================================
 
 ; Takes nand as primitive
 
@@ -53,7 +54,7 @@
 (test (nand 0 'x) 'error)
 (test (nand 2 10) 'error)
 
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 (defun not (a) (nand a a))
 
@@ -106,14 +107,14 @@
 (test (dmux 0 1) (values 0 0))
 (test (dmux 1 1) (values 0 1))
 
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 (deftype bus16 () '(bit-vector 16))
 (deftype bus8 () '(bit-vector 8))
 (deftype bus3 () '(bit-vector 3))
 (deftype bus2 () '(bit-vector 2))
 
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 (defun not16 (in16) 
   (check-type in16 bus16)
@@ -159,10 +160,6 @@
 
 ;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-(defun bit-vector-to-int (bv)
-  (reduce (lambda (n b) (+ (* n 2) b))
-          bv :initial-value 0))
-
 ; redef optimized version (faster ram)
 
 (defmacro mux16 (a b sel)
@@ -189,7 +186,7 @@
 (test (dmux16 #*1000100010001000 2) 'error)
 (test (dmux16 #*100010001000100 0) 'error)
 
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 #|
 (defun or8way (in8)
@@ -205,7 +202,6 @@
 
 (defun or8way (in8)
   (check-type in8 bus8)
-  ; cascading 7 or-gates in a binary tree is boilerplate
   (reduce #'or in8))
 
 (test (or8way #*00001000) 1)
@@ -304,6 +300,11 @@
                  #*111) #*1111111111111110)
 
 ;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+(defun bit-vector-to-int (bv)
+  (reduce (lambda (n b) (+ (* n 2) b))
+          bv :initial-value 0))
+
 ; redef optimized versions (faster ram)
 
 (defmacro mux4way16 (a b c d sel)
@@ -371,8 +372,7 @@
 (test (dmux8way 0 #*110) (values 0 0 0 0 0 0 0 0))
 (test (dmux8way 0 #*111) (values 0 0 0 0 0 0 0 0))
 
-;====================================================================
-
+;===============================================================================
 
 ; macro level recursion effectively rewriting boilerplate 
 ; nested multiple value binds representing ripple wiring
@@ -390,10 +390,13 @@
             (carry (xor carry0 carry1)))
       (values carry sum)))
   (values 
-    '(MULTIPLE-VALUE-BIND (CARRY0 SUM0) (HALFADDER B C) (WIRE (((CARRY1 SUM) (HALFADDER A SUM0)) (CARRY (XOR CARRY0 CARRY1))) (VALUES CARRY SUM)))
+    '(MULTIPLE-VALUE-BIND 
+      (CARRY0 SUM0) (HALFADDER B C) 
+      (WIRE (((CARRY1 SUM) (HALFADDER A SUM0)) 
+             (CARRY (XOR CARRY0 CARRY1))) (VALUES CARRY SUM)))
     T))
 
-;====================================================================
+;===============================================================================
 
 (defun halfadder (a b)
   (values (and a b) (xor a b)))
@@ -457,7 +460,7 @@
 (test (inc16 #*0000000000100000) #*0000000000100001)
 (test (inc16 #*000000000010000) 'error)
 
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 (defun alu (x y zx nx zy ny f no)
   (check-type x bus16)
@@ -478,93 +481,111 @@
     (values out (not (or16way out)) (bit out 0))))
 
 
-;; 1. Constant outputs: 0, 1, -1
-(test (alu #*0000000000010001 #*0000000000000011 1 0 1 0 1 0)
+(test (alu    #*0000000000010001 
+              #*0000000000000011 
+                                       1 0 1 0 1 0) ; 0
       (values #*0000000000000000 1 0)) ; 0
-(test (alu #*0000000000010001 #*0000000000000011 1 1 1 1 1 1)
+
+(test (alu    #*0000000000010001 
+              #*0000000000000011 
+                                       1 1 1 1 1 1) ; 1
       (values #*0000000000000001 0 0)) ; 1
-(test (alu #*0000000000010001 #*0000000000000011 1 1 1 0 1 0)
+
+(test (alu    #*0000000000010001 
+              #*0000000000000011 
+                                       1 1 1 0 1 0) ; -1
       (values #*1111111111111111 0 1)) ; -1
 
-;; 2. Single-operand identity & bitwise NOT: x, y, !x, !y
-(test (alu #*0000000000010001 #*0000000000000011 0 0 1 1 0 0)
-      (values #*0000000000010001 0 0)) ; x
-(test (alu #*0000000000010001 #*0000000000000011 1 1 0 0 0 0)
-      (values #*0000000000000011 0 0)) ; y
-(test (alu #*0000000000010001 #*0000000000000011 0 0 1 1 0 1)
-      (values #*1111111111101110 0 1)) ; !x
-(test (alu #*0000000000010001 #*0000000000000011 1 1 0 0 0 1)
-      (values #*1111111111111100 0 1)) ; !y
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 
+                                       0 0 1 1 0 0) ; x
+      (values #*0000000000010001 0 0)) ; 17
 
-;; 3. Two's complement arithmetic negation: -x, -y
-(test (alu #*0000000000010001 #*0000000000000011 0 0 1 1 1 1)
-      (values #*1111111111101111 0 1)) ; -x (-17)
-(test (alu #*0000000000010001 #*0000000000000011 1 1 0 0 1 1)
-      (values #*1111111111111101 0 1)) ; -y (-3)
+(test (alu    #*0000000000010001 
+              #*0000000000000011 ; y = 3
+                                       1 1 0 0 0 0) ; y
+      (values #*0000000000000011 0 0)) ; 3
 
-;; 4. Increment & decrement: x+1, y+1, x-1, y-1
-(test (alu #*0000000000010001 #*0000000000000011 0 1 1 1 1 1)
-      (values #*0000000000010010 0 0)) ; x+1 (18)
-(test (alu #*0000000000010001 #*0000000000000011 1 1 0 1 1 1)
-      (values #*0000000000000100 0 0)) ; y+1 (4)
-(test (alu #*0000000000010001 #*0000000000000011 0 0 1 1 1 0)
-      (values #*0000000000010000 0 0)) ; x-1 (16)
-(test (alu #*0000000000010001 #*0000000000000011 1 1 0 0 1 0)
-      (values #*0000000000000010 0 0)) ; y-1 (2)
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 
+                                       0 0 1 1 0 1) ; !x
+      (values #*1111111111101110 0 1)) ; -18
 
-;; 5. Two-operand arithmetic: x+y, x-y, y-x
-(test (alu #*0000000000010001 #*0000000000000011 0 0 0 0 1 0)
-      (values #*0000000000010100 0 0)) ; x+y (20)
-(test (alu #*0000000000010001 #*0000000000000011 0 1 0 0 1 1)
-      (values #*0000000000001110 0 0)) ; x-y (14)
-(test (alu #*0000000000010001 #*0000000000000011 0 0 0 1 1 1)
-      (values #*1111111111110010 0 1)) ; y-x (-14)
+(test (alu    #*0000000000010001 
+              #*0000000000000011 ; y = 3
+                                       1 1 0 0 0 1) ; !y
+      (values #*1111111111111100 0 1)) ; -4
 
-;; 6. Two-operand bitwise logic: x&y, x|y
-(test (alu #*0000000000010001 #*0000000000000011 0 0 0 0 0 0)
-      (values #*0000000000000001 0 0)) ; x&y (1)
-(test (alu #*0000000000010001 #*0000000000000011 0 1 0 1 0 1)
-      (values #*0000000000010011 0 0)) ; x|y (19)
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 
+                                       0 0 1 1 1 1) ; -x
+      (values #*1111111111101111 0 1)) ; -17
 
-;; 7. Zero-flag edge cases with non-zero inputs
-(test (alu #*0000000000010001 #*0000000000010001 0 1 0 0 1 1)
-      (values #*0000000000000000 1 0)) ; x-x = 0
-(test (alu #*1111111111111111 #*0000000000000011 0 1 1 1 1 1)
-      (values #*0000000000000000 1 0)) ; -1+1 = 0
+(test (alu    #*0000000000010001 
+              #*0000000000000011 ; y = 3
+                                       1 1 0 0 1 1) ; -y
+      (values #*1111111111111101 0 1)) ; -3
 
-;; 8. Type & width errors
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 
+                                       0 1 1 1 1 1) ; x + 1
+      (values #*0000000000010010 0 0)) ; 18
+
+(test (alu    #*0000000000010001 
+              #*0000000000000011 ; y = 3
+                                       1 1 0 1 1 1) ; y + 1
+      (values #*0000000000000100 0 0)) ; 4
+
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 
+                                       0 0 1 1 1 0) ; x - 1
+      (values #*0000000000010000 0 0)) ; 16
+
+(test (alu    #*0000000000010001 
+              #*0000000000000011 ; y = 3
+                                       1 1 0 0 1 0) ; y - 1
+      (values #*0000000000000010 0 0)) ; 2
+
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 ; y = 3
+                                       0 0 0 0 1 0) ; x + y
+      (values #*0000000000010100 0 0)) ; 20
+
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 ; y = 3
+                                       0 1 0 0 1 1) ; x - y
+      (values #*0000000000001110 0 0)) ; 14
+
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 ; y = 3
+                                       0 0 0 1 1 1) ; y - x
+      (values #*1111111111110010 0 1)) ; -14
+
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 ; y = 3
+                                       0 0 0 0 0 0) ; x & y
+      (values #*0000000000000001 0 0)) ; 1
+
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000000011 ; y = 3
+                                       0 1 0 1 0 1) ; x | y
+      (values #*0000000000010011 0 0)) ; 19
+
+(test (alu    #*0000000000010001 ; x = 17
+              #*0000000000010001 ; y = 17
+                                       0 1 0 0 1 1) ; x - y
+      (values #*0000000000000000 1 0)) ; 0
+
+(test (alu    #*1111111111111111 ; x = -1
+              #*0000000000000011 
+                                       0 1 1 1 1 1) ; x + 1
+      (values #*0000000000000000 1 0)) ; 0
+
 (test (alu #*0000 #*0000000000000011 1 0 1 0 1 0) 'error)
 (test (alu #*0000000000010001 #*0000 1 0 1 0 1 0) 'error)
-(test (alu #*0000000000010001 #*0000000000000011 2 0 1 0 1 0)
-      'error)
+(test (alu #*0000000000010001 #*0000000000000011 2 0 1 0 1 0) 'error)
 
-;====================================================================
-
-#|
-;; Parallel fixed-point propagation model (kept for reference):
-;; Simulates simultaneous gate updates until outputs stabilize.
-;; While faithful to ideal zero-delay logic, transitioning from
-;; the forbidden (0 0) state to (1 1) causes infinite oscillation
-;; due to symmetrical timing.
-;;
-;; Using the sequential version below instead: its fixed
-;; evaluation order acts as a deterministic tie-breaker,
-;; mirroring real-world propagation skew that collapses
-;; metastability into a valid state without hanging.
-
-(wire ((q 0)
-       (q-not 1))
-  (defun sr-latch (s r)
-    (labels ((settle (curr-q curr-q-not)
-               (let ((next-q (nand s curr-q-not))
-                     (next-q-not (nand r curr-q)))
-                 (if (cl:and (= next-q curr-q)
-                             (= next-q-not curr-q-not))
-                     (values (setf q next-q)
-                             (setf q-not next-q-not))
-                     (settle next-q next-q-not)))))
-      (settle q q-not))))
-|#
+;===============================================================================
 
 (defun make-sr-latch ()
  (let ((q 0)
@@ -594,16 +615,13 @@
 (test (funcall test-latch 0 1) (values 1 0))
 (test (funcall test-latch 0 1) (values 1 0))
 (test (funcall test-latch 0 0) (values 1 1))
-; predictable metastable collapse
 (test (funcall test-latch 1 1) (values 1 0)) 
 
 #|
-; works due to predictable behaviour when (0 0)
 (defun d-latch (d e &aux (en (not e)))
   (values (not (sr-latch (mux d 1 en) en))))
 |#
 
-; standard construction avoids (0 0)
 (defun make-d-latch ()
   (let ((latch (make-sr-latch)))
     (lambda (d en)
@@ -645,19 +663,6 @@
 (test (funcall *test-dff-01* 0 0) 1)
 (test (funcall *test-dff-01* 0 1) 0)
 
-#|
-; Significantly faster version, not made from base gates
-(defun make-dff ()
-  (let ((q 0)
-        (previous-clock 0))
-    (lambda (d clock)
-      (when (cl:and (= previous-clock 0) (= clock 1))
-        (setf q d))
-      (setf previous-clock clock)
-      q)))
-|#
-
-
 (defun make-bit ()
   (let ((dff (make-dff))
         (dff-out 0))
@@ -680,17 +685,6 @@
 (test (funcall test-bit 1 0 1) 0)
 (test (funcall test-bit 1 1 0) 0)
 (test (funcall test-bit 1 1 1) 1)
-
-#|
-(defun make-register ()
-  (let ((bits (make-array 16
-                        :initial-contents
-                        (loop repeat 16 collect (make-bit)))))
-    (lambda (in16 load clock)
-      (map 'bit-vector 
-           (lambda (b d) (funcall b d load clock)) 
-           bits in16))))
-|#
 
 (defun make-register ()
   (let ((b0  (make-bit))
@@ -761,22 +755,7 @@
 (test (funcall *test-register* #*0101010101010101 1 1) #*0101010101010101)
 (test (funcall *test-register* #*0101010101010101 1 0) #*0101010101010101)
 
-;====================================================================
-
-#|
-(defun make-ram8 ()
-  (let ((registers (make-array 8
-                      :initial-contents
-                      (loop repeat 8 collect (make-register)))))
-    (lambda (in16 load address clock)
-      (let* ((loads (dmux8way load address))
-             (mem-contents
-               (map 'bus16
-                    (lambda (register enable)
-                      (funcall register in16 enable clock))
-                    registers loads)))
-        (mux8way16 mem-contents address)))))
-|#
+;===============================================================================
 
 (defun make-ram8 ()
   (let ((r0 (make-register))
@@ -802,30 +781,55 @@
           (funcall r7 in16 load7 clock)
           address)))))
 
-;----------------------
+;-------------------------------------------------------------------------------
 
-(defun integer-to-bus (n width)
-  (make-array width :element-type 'bit :initial-contents
-              (loop for i downfrom (1- width) to 0
-                    collect (ldb (byte 1 i) n))))
+(defun to-bits (integer n-bits)
+  (make-array n-bits :element-type 'bit
+              :initial-contents
+              (loop for i from (1- n-bits) downto 0
+                    collect (ldb (byte 1 i) integer))))
 
-(defun fill-ram (ram k)
-  (dotimes (address (ash 1 k))
-    (let ((address-bus (integer-to-bus address k))
-          (in16 (integer-to-bus address 16)))
-      (funcall ram in16 address-bus 1 0)
-      (funcall ram in16 address-bus 1 1))))
+(defun bus-size-int (bus-lines-n)
+  (ash 1 bus-lines-n))
 
-(defun test-ram (ram k)
-  (fill-ram ram k)
-  (dotimes (address (ash 1 k))
-    (test (funcall ram #*0000000000000000
-                   (integer-to-bus address k) 0 0)
-          (integer-to-bus address 16))))
+(defun sequential-ram-filler (bus-lines-n)
+  (map 'vector
+       (lambda (i) (to-bits i 16))
+       (loop for i below (bus-size-int bus-lines-n)
+             collect i)))
+
+(defun fill-ram (ram filler bus-lines-n)
+  (loop for in16 across filler
+        for i from 0
+        for address = (to-bits i bus-lines-n)
+        do (funcall ram in16 address 1 0)
+           (funcall ram in16 address 1 1)))
+
+(defun ram-to-array (ram bus-lines-n)
+  (map 'vector
+       (lambda (address)
+         (funcall ram #*0000000000000000 address 0 0))
+       (loop for i below (bus-size-int bus-lines-n)
+             collect (to-bits i bus-lines-n))))
+
+(defun test-ram (ram bus-lines-n)
+  (let ((expected (sequential-ram-filler bus-lines-n)))
+    (fill-ram ram expected bus-lines-n)
+    (test (ram-to-array ram bus-lines-n) expected)
+    t))
+
+(defparameter *test-ram8* (make-ram8))
+
+(fill-ram *test-ram8* (sequential-ram-filler 3) 3)
+(test (ram-to-array *test-ram8* 3)
+      #(#*0000000000000000 #*0000000000000001 
+        #*0000000000000010 #*0000000000000011 
+        #*0000000000000100 #*0000000000000101 
+        #*0000000000000110 #*0000000000000111))
+
+;-------------------------------------------------------------------------------
 
 (test-ram (make-ram8) 3)
-
-;----------------------
 
 (defun make-ram64 ()
   (let ((r0 (make-ram8))
@@ -953,27 +957,26 @@
           (funcall r1 in16 ram16k-address load1 clock)
           bank-address)))))
 
-(defparameter *test-ram32k* (make-ram32k))
+(test-ram (make-ram32k) 15)
 
-;====================================================================
-
-(defun make-pc ()
-  (let ((reg (make-register)))
-    (lambda (in16 inc load reset clock)
-      (add16 (funcall reg (mux16 in16 #*0000000000000000 reset) load clock)
-             (mux16 #*0000000000000000 #*0000000000000001 inc)))))
+;===============================================================================
+; Real output wires update instantly with hardware propagation.
+; Here wire vars must be updated before calls.
 
 (defun make-pc ()
   (let ((register (make-register))
         (out16 #*0000000000000000))
     (lambda (in16 inc load reset clock)
-      (wire ((incremented (inc16 out16))
-             (after-inc (mux16 out16 incremented inc))
-             (after-load (mux16 after-inc in16 load))
-             (register-in (mux16 after-load #*0000000000000000 reset))
-             (register-load (or reset (or load inc))))
-        (setf out16
-              (funcall register register-in register-load clock))))))
+      ; update output wire vars
+      (setf out16 (funcall register #*0000000000000000 0 clock))
+      (funcall register 
+               (mux16 
+                 (mux16 
+                   (mux16 out16 (inc16 out16) inc)
+                   in16 load) 
+                 #*0000000000000000 reset) 
+               (or reset (or load inc)) 
+               clock))))
 
 (defparameter *test-pc* (make-pc))
 
@@ -998,7 +1001,7 @@
 (test (funcall *test-pc* #*0000000000000000 1 0 0 0) #*0000000000000000)
 (test (funcall *test-pc* #*0000000000000000 1 0 0 1) #*0000000000000001)
 
-;====================================================================
+;===============================================================================
 
 ; A ::   0 v v v  v  v  v  v   v  v  v  v   v  v  v  v   
 ; C ::   1 1 1 a  c1 c2 c3 c4  c5 c6 d1 d2  d3 j1 j2 j3
@@ -1012,7 +1015,7 @@
 
     (lambda (inM16 instruction16 reset clock)
       
-      ; update output wire vars from previous clock
+      ; update output wire vars
       (setf A-out (funcall A #*0000000000000000 0 clock))
       (setf D-out (funcall D #*0000000000000000 0 clock))
       
@@ -1020,7 +1023,7 @@
              (A? (not C?))
              (A-or-M (mux16 A-out inM16 (bit instruction16 3)))
              
-             ((out eq lt)
+             ((out eq lt) ; zr ng
               (alu D-out A-or-M
                    (bit instruction16 4)  ; zx
                    (bit instruction16 5)  ; nx
@@ -1048,371 +1051,340 @@
         
         (values out
                 write-to-M
-                (subseq A-out 1) ; 15 bits
+                (subseq A-out 1) ; 15 bits (addressM)
                 (subseq (funcall pc A-out inc-pc? load-pc? reset clock)
-                        1)))))) ; 15 bits
+                        1)))))) ; 15 bits (pc)
     
 (defparameter *test-cpu* (make-cpu))
+(test (funcall *test-cpu* #*0000000000000000
+               #*0011000000111001 0 0) ; A, @12345
+      (values :____ 0 #*000000000000000 #*000000000000000)) ; :____, 0, 0, 0
+(test (funcall *test-cpu* #*0000000000000000
+               #*0011000000111001 0 1) ; A, @12345
+      (values :____ 0 #*011000000111001 #*000000000000001)) ; :____, 0, 12345, 1
 
-(test (funcall *test-cpu* #*0000000000000000 #*0011000000111001 0 0)
-      (values :any 0 #*000000000000000 #*000000000000000))
-(test (funcall *test-cpu* #*0000000000000000 #*0011000000111001 0 1)
-      (values :any 0 #*011000000111001 #*000000000000001))
-(test (funcall *test-cpu* #*0000000000000000 #*1110110000010000 0 0)
-      (values :any 0 #*011000000111001 #*000000000000001))
-(test (funcall *test-cpu* #*0000000000000000 #*1110110000010000 0 1)
-      (values :any 0 #*011000000111001 #*000000000000010))
-(test (funcall *test-cpu* #*0000000000000000 #*0101101110100000 0 0)
-      (values :any 0 #*011000000111001 #*000000000000010))
-(test (funcall *test-cpu* #*0000000000000000 #*0101101110100000 0 1)
-      (values :any 0 #*101101110100000 #*000000000000011))
-(test (funcall *test-cpu* #*0000000000000000 #*1110000111110000 0 0)
-      (values :any 0 #*101101110100000 #*000000000000011))
-(test (funcall *test-cpu* #*0000000000000000 #*1110000111110000 0 1)
-      (values :any 0 #*010101101100111 #*000000000000100))
-(test (funcall *test-cpu* #*0000000000000000 #*0000001111101011 0 0)
-      (values :any 0 #*010101101100111 #*000000000000100))
-(test (funcall *test-cpu* #*0000000000000000 #*0000001111101011 0 1)
-      (values :any 0 #*000001111101011 #*000000000000101))
-(test (funcall *test-cpu* #*0000000000000000 #*1110001100001000 0 0)
-      (values #*0010101101100111 1 #*000001111101011 #*000000000000101))
-(test (funcall *test-cpu* #*0000000000000000 #*1110001100001000 0 1)
-      (values #*0010101101100111 1 #*000001111101011 #*000000000000110))
-(test (funcall *test-cpu* #*0000000000000000 #*0000001111101100 0 0)
-      (values :any 0 #*000001111101011 #*000000000000110))
-(test (funcall *test-cpu* #*0000000000000000 #*0000001111101100 0 1)
-      (values :any 0 #*000001111101100 #*000000000000111))
-(test (funcall *test-cpu* #*0000000000000000 #*1110001110011000 0 0)
-      (values #*0010101101100110 1 #*000001111101100 #*000000000000111))
-(test (funcall *test-cpu* #*0000000000000000 #*1110001110011000 0 1)
-      (values #*0010101101100101 1 #*000001111101100 #*000000000001000))
+(test (funcall *test-cpu* #*0000000000000000
+               #*1110110000010000 0 0) ; C, comp: A, dest: D, jump: none
+      (values :____ 0 #*011000000111001 #*000000000000001)) ; :____, 0, 12345, 1
+(test (funcall *test-cpu* #*0000000000000000
+               #*1110110000010000 0 1) ; C, comp: A, dest: D, jump: none
+      (values :____ 0 #*011000000111001 #*000000000000010)) ; :____, 0, 12345, 2
 
-;====================================================================
+(test (funcall *test-cpu* #*0000000000000000
+               #*0101101110100000 0 0) ; A, @23456
+      (values :____ 0 #*011000000111001 #*000000000000010)) ; :____, 0, 12345, 2
+(test (funcall *test-cpu* #*0000000000000000
+               #*0101101110100000 0 1) ; A, @23456
+      (values :____ 0 #*101101110100000 #*000000000000011)) ; :____, 0, 23456, 3
 
-(defun make-rom32k (prog-list)
-  (when (> (length prog-list) (ash 1 15))
-    (error "ROM32K can hold at most 32768 instructions."))
+(test (funcall *test-cpu* #*0000000000000000
+               #*1110000111110000 0 0) ; C, comp: A-D, dest: AD, jump: none
+      (values :____ 0 #*101101110100000 #*000000000000011)) ; :____, 0, 23456, 3
+(test (funcall *test-cpu* #*0000000000000000
+               #*1110000111110000 0 1) ; C, comp: A-D, dest: AD, jump: none
+      (values :____ 0 #*010101101100111 #*000000000000100)) ; :____, 0, 11111, 4
+
+(test (funcall *test-cpu* #*0000000000000000
+               #*0000001111101011 0 0) ; A, @1003
+      (values :____ 0 #*010101101100111 #*000000000000100)) ; :____, 0, 11111, 4
+(test (funcall *test-cpu* #*0000000000000000
+               #*0000001111101011 0 1) ; A, @1003
+      (values :____ 0 #*000001111101011 #*000000000000101)) ; :____, 0, 1003, 5
+
+(test (funcall *test-cpu* #*0000000000000000
+               #*1110001100001000 0 0) ; C, comp: D, dest: M, jump: none
+      (values #*0010101101100111 1
+              #*000001111101011 #*000000000000101)) ; 11111, 1, 1003, 5
+(test (funcall *test-cpu* #*0000000000000000
+               #*1110001100001000 0 1) ; C, comp: D, dest: M, jump: none
+      (values #*0010101101100111 1
+              #*000001111101011 #*000000000000110)) ; 11111, 1, 1003, 6
+
+(test (funcall *test-cpu* #*0000000000000000
+               #*0000001111101100 0 0) ; A, @1004
+      (values :____ 0 #*000001111101011 #*000000000000110)) ; :____, 0, 1003, 6
+(test (funcall *test-cpu* #*0000000000000000
+               #*0000001111101100 0 1) ; A, @1004
+      (values :____ 0 #*000001111101100 #*000000000000111)) ; :____, 0, 1004, 7
+
+(test (funcall *test-cpu* #*0000000000000000
+               #*1110001110011000 0 0) ; C, comp: D-1, dest: MD, jump: none
+      (values #*0010101101100110 1
+              #*000001111101100 #*000000000000111)) ; 11110, 1, 1004, 7
+(test (funcall *test-cpu* #*0000000000000000
+               #*1110001110011000 0 1) ; C, comp: D-1, dest: MD, jump: none
+      (values #*0010101101100101 1
+              #*000001111101100 #*000000000001000)) ; 11109, 1, 1004, 8
+
+;===============================================================================
+
+(defun make-rom32k (prog-array)
   (let ((mem (make-ram32k)))
-    (loop for in16 in prog-list
-          for i from 0
-          for address = (integer-to-bus i 15)
-          do (funcall mem in16 address 1 0)
-             (funcall mem in16 address 1 1))
-    (lambda (address clock)
-      (funcall mem #*0000000000000000 address 0 clock))))
+    (fill-ram mem prog-array 15)
+    (values 
+      (lambda (address clock)
+        (funcall mem #*0000000000000000 address 0 clock))
+      mem)))
 
-(defun rom-filler ()
-  (loop for address below (ash 1 15)
-        collect (integer-to-bus address 16)))
+(multiple-value-bind (rom test-rom) (make-rom32k (sequential-ram-filler 15))
+                     (declare (ignore rom))
+                     (test-ram test-rom 15))
 
-(defparameter *test-rom* (make-rom32k (rom-filler)))
-
-(defun test-rom ()
-  (dotimes (address (ash 1 15))
-    (test (funcall *test-rom* (integer-to-bus address 15) 0)
-          (integer-to-bus address 16))))
-
-(test-rom)
-
-;====================================================================
-
-(defparameter *computer-directory*
-  #.(make-pathname :name nil :type nil
-                   :defaults (cl:or *compile-file-truename*
-                                    *load-truename*
-                                    *default-pathname-defaults*)))
+;-------------------------------------------------------------------------------
 
 (defun open-device-file (name &rest options)
-  (apply #'open (merge-pathnames name *computer-directory*)
-         :element-type '(unsigned-byte 8) options))
+  (apply #'open (merge-pathnames name *load-truename*)
+         :element-type '(unsigned-byte 16) options))
 
-(defparameter screen
-  (open-device-file "screen.bin" :direction :io
-                   :if-exists :overwrite :if-does-not-exist :create))
+(defun open-io-device-file (name)
+  (open-device-file name :direction :io :if-exists :overwrite
+                   :if-does-not-exist :create))
 
-(defparameter keyboard
-  (open-device-file "keyboard.bin" :if-does-not-exist :create))
+(defun open-input-device-file (name)
+  (open-device-file name :direction :input
+                   :if-does-not-exist :create))
+
+(defparameter screen (open-io-device-file "screen.bin"))
+(defparameter keyboard (open-input-device-file "keyboard.bin"))
 
 (defun close-devices (&rest device-fds)
   (dolist (fd device-fds) (close fd)))
 
+;-------------------------------------------------------------------------------
+
 (defun fps-to-ms (fps) (/ 1000 fps))
 
-(defmacro do-at-interval (ms (now next) &body body)
-  (let ((tick (gensym)) (units internal-time-units-per-second))
-    `(let ((,tick ,now))
-       (when (>= ,tick ,next)
-         ,@body
-         (setf ,next (+ ,tick (ceiling (* ,ms ,units) 1000)))))))
+(defun to-internal-time-units (ms)
+  (ceiling (* ms internal-time-units-per-second) 1000))
 
-;--------------------------------------------------------------------
+(defmacro do-at-interval (ms &body body)
+  (let ((now (gensym))
+        (next (gensym)))
+    `(let ((,now (get-internal-real-time))
+           (,next (load-time-value (list 0)))) ; avoid defvar (gensym)
+       (when (>= ,now (car ,next))
+         ,@body
+         (setf (car ,next) (+ ,now (to-internal-time-units ,ms)))))))
+
+(macroexpand '(do-at-interval 100 (print "tick")))
+
+;-------------------------------------------------------------------------------
+
+(defun write-word-to-ram (ram address word)
+  (funcall ram word address 1 0)
+  (funcall ram word address 1 1))
 
 (defun read-keyboard-from-file (stream)
   (file-position stream 0)
-  (let ((low (read-byte stream nil 0))
-        (high (read-byte stream nil 0)))
-    (integer-to-bus (logior low (ash high 8)) 16)))
+  (to-bits (read-byte stream nil 0) 16))
+
+(defun update-keyboard-register (ram)
+  (write-word-to-ram ram #*110000000000000 ; 24576
+                    (read-keyboard-from-file keyboard)))
+
+;-------------------------------------------------------------------------------
 
 (defun read-word-from-ram (ram address)
-  (funcall ram #*0000000000000000 (integer-to-bus address 15) 0 1))
+  (funcall ram #*0000000000000000 address 0 1))
 
-(defun write-word-to-ram (ram address word)
-  (let ((bus (integer-to-bus address 15)))
-    (funcall ram word bus 1 0)
-    (funcall ram word bus 1 1)))
-
-; screen is 8k ram at address 16384 in 32K ram
 (defun write-screen-to-file (stream ram)
-  (let ((frame (make-array #x4000 :element-type '(unsigned-byte 8))))
-    (loop for address from #x4000 below #x6000
-          for i from 0 by 2
-          for word = (bit-vector-to-int
-                      (read-word-from-ram ram address))
-          do (setf (aref frame i) (ldb (byte 8 0) word)
-                   (aref frame (1+ i)) (ldb (byte 8 8) word)))
+  (let ((frame (make-array 8192 :element-type '(unsigned-byte 16)))
+        (start (bit-vector-to-int #*100000000000000))) ; 16384
+    (loop for i below (length frame)
+          for address = (to-bits (+ start i) 15)
+          do (setf (aref frame i)
+                   (bit-vector-to-int (read-word-from-ram ram address))))
     (file-position stream 0)
     (write-sequence frame stream)
-    (finish-output stream)
-    frame))
+    (finish-output stream)))
 
-;--------------------------------------------------------------------
+(defun refresh-screen (ram)
+  (write-screen-to-file screen ram))
 
-(defun make-computer (prog-list)
+;###############################################################################
+
+(defun make-computer (program)
   (let ((cpu (make-cpu))
         (ram (make-ram32k))
-        (rom (make-rom32k prog-list))
+        (rom (make-rom32k program))
         (inM #*0000000000000000)
         (instruction #*0000000000000000))
-    (lambda (reset clock)
-      (wire (((outM writeM addressM pc)
-               (funcall cpu inM instruction reset clock))
-             (ram-out (funcall ram outM addressM writeM clock))
-             (rom-out (funcall rom pc clock)))
-        ; update wires
-        (setf inM ram-out)
-        (setf instruction rom-out)
-        (values ram pc)))))
+    (values
+     (lambda (reset clock)
+       (wire (((outM writeM addressM pc)
+               (funcall cpu inM instruction reset clock)))
+         (setf inM (funcall ram outM addressM writeM clock)
+               instruction (funcall rom pc clock))
+         (values ram pc)))
+     ram)))
 
-(defun run-computer (computer n-cycles end-pc &key (fps 1) (keyboard-poll-ms 100))
-  (check-type fps (real (0)))
-  (check-type keyboard-poll-ms (real (0)))
-  (let ((end-address (when end-pc (integer-to-bus end-pc 15)))
-        (frame-ms (fps-to-ms fps))
-        (next-poll 0)
-        (next-write 0))
-    (funcall computer 1 0)
-    (wire (((ram pc) (funcall computer 1 1)))
-      (dotimes (cycle n-cycles)
-        (let ((now (get-internal-real-time)))
-          (do-at-interval keyboard-poll-ms (now next-poll)
-            (write-word-to-ram ram #x6000
-                              (read-keyboard-from-file keyboard)))
-          (funcall computer 0 0)
-          (setf pc (nth-value 1 (funcall computer 0 1)))
-          (when (equal pc end-address) (return))
-          (do-at-interval frame-ms (now next-write)
-            (write-screen-to-file screen ram))))
-      (values ram pc))))
+;###############################################################################
 
-;====================================================================
+(defun single-step (computer &optional (reset 0))
+  (funcall computer reset 0)
+  (funcall computer reset 1))
 
-(defun test-screen-frame (ram-reader expected-frame)
-  (write-screen-to-file screen ram-reader)
-  (file-position screen 0)
-  (let ((actual (make-array #x4000 :element-type '(unsigned-byte 8))))
-    (test (read-sequence actual screen) #x4000)
-    (test actual expected-frame)))
+(defun run-computer (computer n-cycles end-pc
+                     &key (fps 1) (keyboard-poll-ms 100))
+  (wire ((frame-ms (fps-to-ms fps))
+         ((ram pc) (single-step computer 1)))
+    (dotimes (cycle n-cycles)
+      (do-at-interval keyboard-poll-ms (update-keyboard-register ram))
+      (setf pc (second (multiple-value-list (single-step computer))))
+      (when (equal pc end-pc) (return))
+      (do-at-interval frame-ms (refresh-screen ram)))
+    (values ram pc)))
 
-(defparameter *test-computer* nil)
+;===============================================================================
 
-(defun make-test-computer (prog-list)
-  (when *test-computer*
-    (setf *test-computer* nil)
-    #+sbcl (sb-ext:gc :full t))
-  (setf *test-computer* (make-computer prog-list)))
+(defun test-ram-word (ram address expected)
+  (test (read-word-from-ram ram address) expected))
 
-(defun test-ended-with (pc end-pc)
-  (test (bit-vector-to-int pc) end-pc))
-
-(defun test-ram-words (ram addresses ram-values)
-  (flet ((as-list (value) (if (listp value) value (list value))))
-    (let ((actual
-            (map 'vector
-                 (lambda (address) (read-word-from-ram ram address))
-                 (as-list addresses)))
-          (expected
-            (map 'vector
-                 (lambda (value) (integer-to-bus value 16))
-                 (as-list ram-values))))
-      (test actual expected))))
-
-(defun set-computer-test-ram (computer words)
-  (let ((ram (funcall computer 1 0)))
-    (loop for value in words
-          for i from 0
-          do (write-word-to-ram
-              ram i (integer-to-bus value 16)))))
-
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 (defparameter *sum-1-to-100-program*
-  (list #*0000000000010000 ; @i (RAM[16])
-        #*1110111111001000 ; M=1
-        #*0000000000010001 ; @sum (RAM[17])
-        #*1110101010001000 ; M=0
-        #*0000000000010000 ; @i (LOOP, ROM[4])
-        #*1111110000010000 ; D=M
-        #*0000000001100100 ; @100
-        #*1110010011010000 ; D=D-A
-        #*0000000000010010 ; @END
-        #*1110001100000001 ; D;JGT
-        #*0000000000010000 ; @i
-        #*1111110000010000 ; D=M
-        #*0000000000010001 ; @sum
-        #*1111000010001000 ; M=D+M
-        #*0000000000010000 ; @i
-        #*1111110111001000 ; M=M+1
-        #*0000000000000100 ; @LOOP
-        #*1110101010000111 ; 0;JMP
-        #*0000000000010010 ; @END (END, ROM[18])
-        #*1110101010000111)) ; 0;JMP
+  #(#*0000000000010000 ; @i (RAM[16])
+    #*1110111111001000 ; M=1
+    #*0000000000010001 ; @sum (RAM[17])
+    #*1110101010001000 ; M=0
+    #*0000000000010000 ; @i (LOOP, ROM[4])
+    #*1111110000010000 ; D=M
+    #*0000000001100100 ; @100
+    #*1110010011010000 ; D=D-A
+    #*0000000000010010 ; @END
+    #*1110001100000001 ; D;JGT
+    #*0000000000010000 ; @i
+    #*1111110000010000 ; D=M
+    #*0000000000010001 ; @sum
+    #*1111000010001000 ; M=D+M
+    #*0000000000010000 ; @i
+    #*1111110111001000 ; M=M+1
+    #*0000000000000100 ; @LOOP
+    #*1110101010000111 ; 0;JMP
+    #*0000000000010010 ; @END (END, ROM[18])
+    #*1110101010000111)) ; 0;JMP
 
 (defun test-sum-1-to-100 ()
-  (let ((computer
-          (make-test-computer *sum-1-to-100-program*)))
-    (wire (((ram pc)
-            (run-computer computer 2000 18)))
-      (test-ended-with pc 18)
-      (test-ram-words ram 17 5050))))
+  (wire ((computer (make-computer *sum-1-to-100-program*))
+         (end-pc #*000000000010010)
+         ((ram pc) (run-computer computer 2000 end-pc)))
+    (test pc end-pc)
+    (test-ram-word ram #*000000000010001 #*0001001110111010))) ; 5050
 
 (test-sum-1-to-100)
 
-;--------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 (defparameter *add-program*
-  (list #*0000000000000010 ; @2
-        #*1110110000010000 ; D=A
-        #*0000000000000011 ; @3
-        #*1110000010010000 ; D=D+A
-        #*0000000000000000 ; @R0
-        #*1110001100001000)) ; M=D
+  #(#*0000000000000010 ; @2
+    #*1110110000010000 ; D=A
+    #*0000000000000011 ; @3
+    #*1110000010010000 ; D=D+A
+    #*0000000000000000 ; @R0
+    #*1110001100001000)) ; M=D
 
-(defparameter *max-program*
-  (list #*0000000000000000 ; @R0
-        #*1111110000010000 ; D=M
-        #*0000000000000001 ; @R1
-        #*1111010011010000 ; D=D-M
-        #*0000000000001010 ; @FIRST
-        #*1110001100000001 ; D;JGT
-        #*0000000000000001 ; @R1
-        #*1111110000010000 ; D=M
-        #*0000000000001100 ; @STORE
-        #*1110101010000111 ; 0;JMP
-        #*0000000000000000 ; @R0 (FIRST, ROM[10])
-        #*1111110000010000 ; D=M
-        #*0000000000000010 ; @R2 (STORE, ROM[12])
-        #*1110001100001000 ; M=D
-        #*0000000000001110 ; @END (END, ROM[14])
-        #*1110101010000111)) ; 0;JMP
-
-(defparameter *rect-program*
-  (list #*0000000000000000 ; @R0 ; height
-        #*1111110000010000 ; D=M
-        #*0000000000010111 ; @END
-        #*1110001100000110 ; D;JLE
-        #*0000000000010000 ; @rows
-        #*1110001100001000 ; M=D
-        #*0100000000000000 ; @SCREEN
-        #*1110110000010000 ; D=A
-        #*0000000000010001 ; @address
-        #*1110001100001000 ; M=D
-        #*0000000000010001 ; @address (LOOP, ROM[10])
-        #*1111110000100000 ; A=M
-        #*1110111010001000 ; M=-1
-        #*0000000000010001 ; @address
-        #*1111110000010000 ; D=M
-        #*0000000000100000 ; @32
-        #*1110000010010000 ; D=D+A
-        #*0000000000010001 ; @address
-        #*1110001100001000 ; M=D
-        #*0000000000010000 ; @rows
-        #*1111110010011000 ; MD=M-1
-        #*0000000000001010 ; @LOOP
-        #*1110001100000001 ; D;JGT
-        #*0000000000010111 ; @END (END, ROM[23])
-        #*1110101010000111)) ; 0;JMP
+(defun preset-ram (ram &rest words)
+  (fill-ram ram (coerce words 'vector) 15))
 
 (defun test-computer-add ()
-  (let ((computer (make-test-computer *add-program*)))
-    (wire (((ram pc)
-            (run-computer computer 6 6)))
-      (test-ended-with pc 6)
-      (test-ram-words ram 0 5))
-
-    (set-computer-test-ram computer '(0))
-
-    (wire (((ram pc)
-            (run-computer computer 6 6)))
-      (test-ended-with pc 6)
-      (test-ram-words ram 0 5))))
-
-(defun test-computer-max ()
-  (let ((computer (make-test-computer *max-program*)))
-    (set-computer-test-ram computer '(3 5))
-
-    (wire (((ram pc)
-            (run-computer computer 14 14)))
-      (test-ended-with pc 14)
-      (test-ram-words ram
-                      '(0 1 2)
-                      '(3 5 5)))
-
-    (set-computer-test-ram computer '(23456 12345))
-
-    (wire (((ram pc)
-            (run-computer computer 10 14)))
-      (test-ended-with pc 14)
-      (test-ram-words ram
-                      '(0 1 2)
-                      '(23456 12345 23456)))))
-
-(defun make-rect-test-program (height)
-  (list* (integer-to-bus height 16)
-         #*1110110000010000 ; D=A
-         (cddr *rect-program*)))
-
-(defun make-rect-frame (height)
-  (let ((frame (make-array #x4000 :element-type '(unsigned-byte 8)
-                                  :initial-element 0)))
-    (dotimes (row height frame)
-      (let ((i (* row #x40)))
-        (setf (aref frame i) #xff
-              (aref frame (1+ i)) #xff)))))
-
-(defun test-computer-rect ()
-  (let ((computer
-          (make-test-computer
-           (make-rect-test-program 4)))
-        (frame (make-rect-frame 4)))
-    (wire (((ram pc)
-            (run-computer computer 63 24)))
-      (test-ended-with pc 24)
-      (test-screen-frame ram frame)
-      t)))
+  (wire (((computer ram) (make-computer *add-program*))
+         (end-pc #*000000000000110))
+    (preset-ram ram #*0000000000000000)
+    (test (nth-value 1 (run-computer computer 6 end-pc)) end-pc)
+    (test-ram-word ram #*000000000000000 #*0000000000000101)))
 
 (test-computer-add)
+
+;-------------------------------------------------------------------------------
+
+(defparameter *max-program*
+  #(#*0000000000000000 ; @R0
+    #*1111110000010000 ; D=M
+    #*0000000000000001 ; @R1
+    #*1111010011010000 ; D=D-M
+    #*0000000000001010 ; @FIRST
+    #*1110001100000001 ; D;JGT
+    #*0000000000000001 ; @R1
+    #*1111110000010000 ; D=M
+    #*0000000000001100 ; @STORE
+    #*1110101010000111 ; 0;JMP
+    #*0000000000000000 ; @R0 (FIRST, ROM[10])
+    #*1111110000010000 ; D=M
+    #*0000000000000010 ; @R2 (STORE, ROM[12])
+    #*1110001100001000 ; M=D
+    #*0000000000001110 ; @END (END, ROM[14])
+    #*1110101010000111)) ; 0;JMP
+
+(defun test-computer-max ()
+  (wire (((computer ram) (make-computer *max-program*))
+         (end-pc #*000000000001110)) ; ROM[14]
+    (preset-ram ram #*0000000000000011 #*0000000000000101
+                #*0000000000000000) ; 3, 5, 0
+    (test (nth-value 1 (run-computer computer 14 end-pc)) end-pc)
+    (test-ram-word ram #*000000000000000 #*0000000000000011) ; R0 = 3
+    (test-ram-word ram #*000000000000001 #*0000000000000101) ; R1 = 5
+    (test-ram-word ram #*000000000000010 #*0000000000000101) ; R2 = 5
+
+    (preset-ram ram #*0101101110100000 #*0011000000111001
+                #*0000000000000000) ; 23456, 12345, 0
+    (test (nth-value 1 (run-computer computer 10 end-pc)) end-pc)
+    (test-ram-word ram #*000000000000000 #*0101101110100000) ; R0 = 23456
+    (test-ram-word ram #*000000000000001 #*0011000000111001) ; R1 = 12345
+    (test-ram-word ram #*000000000000010 #*0101101110100000))) ; R2 = 23456
+
 (test-computer-max)
+
+;-------------------------------------------------------------------------------
+
+(defparameter *rect-program*
+  #(#*0000000000000000 ; @R0 ; height
+    #*1111110000010000 ; D=M
+    #*0000000000010111 ; @END
+    #*1110001100000110 ; D;JLE
+    #*0000000000010000 ; @rows_counter
+    #*1110001100001000 ; M=D
+    #*0100000000000000 ; @SCREEN
+    #*1110110000010000 ; D=A
+    #*0000000000010001 ; @address
+    #*1110001100001000 ; M=D
+    #*0000000000010001 ; @address (LOOP, ROM[10])
+    #*1111110000100000 ; A=M
+    #*1110111010001000 ; M=-1
+    #*0000000000010001 ; @address
+    #*1111110000010000 ; D=M
+    #*0000000000100000 ; @32
+    #*1110000010010000 ; D=D+A
+    #*0000000000010001 ; @address
+    #*1110001100001000 ; M=D
+    #*0000000000010000 ; @rows_counter
+    #*1111110010011000 ; MD=M-1
+    #*0000000000001010 ; @LOOP
+    #*1110001100000001 ; D;JGT
+    #*0000000000010111 ; @END (END, ROM[23])
+    #*1110101010000111)) ; 0;JMP
+
+(defun test-rect-in-screen-ram (ram height)
+  (let ((screen-start (bit-vector-to-int #*100000000000000))) ; 16384
+    (dotimes (row 256) ; screen height: 256 px
+      (dotimes (column 32) ; 32 word cols x 16 bits = 512 px (1 bit/px)
+        (test-ram-word
+         ram (to-bits (+ screen-start (* row 32) column) 15)
+         (if (cl:and (< row height) (zerop column))
+             #*1111111111111111
+             #*0000000000000000))))))
+
+(defun test-computer-rect ()
+  (wire (((computer ram) (make-computer *rect-program*))
+         (height #*0000000000000100) ; 256
+         (end-pc #*000000000010111)) ; @END, ROM[23]
+    (preset-ram ram height)
+    (test (nth-value 1 (run-computer computer 63 end-pc)) end-pc)
+    (test-rect-in-screen-ram ram (bit-vector-to-int height))))
+
 (test-computer-rect)
-;====================================================================
+
+;-------------------------------------------------------------------------------
 
 (close-devices screen keyboard)
-; recreate screen keyboard params above for further testing after load
-
-#|
-; load using
-(time 
-    (progn (load "NAND.lisp" :print t)
-           (in-package :nand2tetris)))
-|#
 
 :end
