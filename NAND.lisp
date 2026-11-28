@@ -49,7 +49,7 @@
   (if (cl:and (= a 1) (= b 1)) 0 1))
 
 (test (nand 0 0) 1)
-(test (nand 0 1) 1) 
+(test (nand 0 1) 1)
 (test (nand 1 0) 1)
 (test (nand 1 1) 0)
 (test-error (nand 0.2 1))
@@ -88,7 +88,7 @@
 (test-error (xor 0.2 1))
 
 (defun mux (a b sel)
-	(or (and a (not sel)) (and b sel) ))
+  (or (and a (not sel)) (and b sel)))
 
 (test (mux 0 0 0) 0)
 (test (mux 0 1 0) 0)
@@ -118,7 +118,7 @@
 
 ;-------------------------------------------------------------------------------
 
-(defun not16 (in16) 
+(defun not16 (in16)
   (check-type in16 bus16)
   (map 'bus16 #'not in16))
 
@@ -128,7 +128,7 @@
 (test-error (not16 #*001))
 (test-error (not16 #*11110000111100001))
 
-(defun and16 (a16 b16) 
+(defun and16 (a16 b16)
   (check-type a16 bus16)
   (check-type b16 bus16)
   (map 'bus16 #'and a16 b16))
@@ -139,7 +139,7 @@
 (test-error (and16 #*0000 #*1111))
 (test-error (and16 #*1000100010001000 #*000100010001000101))
 
-(defun or16 (a16 b16) 
+(defun or16 (a16 b16)
   (check-type a16 bus16)
   (check-type b16 bus16)
   (map 'bus16 #'or a16 b16))
@@ -175,15 +175,15 @@
   (values (mux16 in16 #*0000000000000000 sel)
           (mux16 #*0000000000000000 in16 sel)))
 
-(test (dmux16 #*1000100010001000 0) 
+(test (dmux16 #*1000100010001000 0)
       (values #*1000100010001000 #*0000000000000000))
-(test (dmux16 #*1000100010001000 1) 
+(test (dmux16 #*1000100010001000 1)
       (values #*0000000000000000 #*1000100010001000))
-(test (dmux16 #*1111111111111111 0) 
+(test (dmux16 #*1111111111111111 0)
       (values #*1111111111111111 #*0000000000000000))
-(test (dmux16 #*1111111111111111 1) 
+(test (dmux16 #*1111111111111111 1)
       (values #*0000000000000000 #*1111111111111111))
-(test (dmux16 #*0000000000000000 1) 
+(test (dmux16 #*0000000000000000 1)
       (values #*0000000000000000 #*0000000000000000))
 (test-error (dmux16 #*1000100010001000 2))
 (test-error (dmux16 #*100010001000100 0))
@@ -198,7 +198,7 @@
       (or (bit in8 5)
         (or (bit in8 4)
           (or (bit in8 3)
-            (or (bit in8 2) 
+            (or (bit in8 2)
               (or (bit in8 0) (bit in8 1)))))))))
 |#
 
@@ -223,81 +223,81 @@
 
 (defun mux4way16 (a b c d sel)
   (check-type sel bus2)
-  (mux16 
-    (mux16 a b (bit sel 1)) 
+  (mux16
+    (mux16 a b (bit sel 1))
     (mux16 c d (bit sel 1))
     (bit sel 0)))
 
-(test (mux4way16 #*0000000000000000 #*0001000100010001 
+(test (mux4way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
                  #*00) #*0000000000000000)
 
-(test (mux4way16 #*0000000000000000 #*0001000100010001 
+(test (mux4way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
                  #*01) #*0001000100010001)
 
-(test (mux4way16 #*0000000000000000 #*0001000100010001 
+(test (mux4way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
                  #*10) #*1000100010001000)
 
-(test (mux4way16 #*0000000000000000 #*0001000100010001 
+(test (mux4way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
                  #*11) #*1111111111111111)
 
 
 (defun mux8way16 (a b c d e f g h sel)
   (check-type sel bus3)
-  (mux16 
-    (mux4way16 a b c d (subseq sel 1 (1+ 2))) 
+  (mux16
+    (mux4way16 a b c d (subseq sel 1 (1+ 2)))
     (mux4way16 e f g h (subseq sel 1 (1+ 2)))
     (bit sel 0)))
 
 
-(test (mux8way16 #*0000000000000000 #*0001000100010001 
+(test (mux8way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
-                 #*1100110011001100 #*0101010101010101 
+                 #*1100110011001100 #*0101010101010101
                  #*0000000011111111 #*1111111111111110
                  #*000) #*0000000000000000)
 
-(test (mux8way16 #*0000000000000000 #*0001000100010001 
+(test (mux8way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
-                 #*1100110011001100 #*0101010101010101 
+                 #*1100110011001100 #*0101010101010101
                  #*0000000011111111 #*1111111111111110
                  #*001) #*0001000100010001)
 
-(test (mux8way16 #*0000000000000000 #*0001000100010001 
+(test (mux8way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
-                 #*1100110011001100 #*0101010101010101 
+                 #*1100110011001100 #*0101010101010101
                  #*0000000011111111 #*1111111111111110
                  #*010) #*1000100010001000)
 
-(test (mux8way16 #*0000000000000000 #*0001000100010001 
+(test (mux8way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
-                 #*1100110011001100 #*0101010101010101 
+                 #*1100110011001100 #*0101010101010101
                  #*0000000011111111 #*1111111111111110
                  #*011) #*1111111111111111)
 
-(test (mux8way16 #*0000000000000000 #*0001000100010001 
+(test (mux8way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
-                 #*1100110011001100 #*0101010101010101 
+                 #*1100110011001100 #*0101010101010101
                  #*0000000011111111 #*1111111111111110
                  #*100) #*1100110011001100)
 
-(test (mux8way16 #*0000000000000000 #*0001000100010001 
+(test (mux8way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
-                 #*1100110011001100 #*0101010101010101 
+                 #*1100110011001100 #*0101010101010101
                  #*0000000011111111 #*1111111111111110
                  #*101) #*0101010101010101)
 
-(test (mux8way16 #*0000000000000000 #*0001000100010001 
+(test (mux8way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
-                 #*1100110011001100 #*0101010101010101 
+                 #*1100110011001100 #*0101010101010101
                  #*0000000011111111 #*1111111111111110
                  #*110) #*0000000011111111)
 
-(test (mux8way16 #*0000000000000000 #*0001000100010001 
+(test (mux8way16 #*0000000000000000 #*0001000100010001
                  #*1000100010001000 #*1111111111111111
-                 #*1100110011001100 #*0101010101010101 
+                 #*1100110011001100 #*0101010101010101
                  #*0000000011111111 #*1111111111111110
                  #*111) #*1111111111111110)
 
@@ -376,7 +376,7 @@
 
 ;===============================================================================
 
-; macro level recursion effectively rewriting boilerplate 
+; macro level recursion effectively rewriting boilerplate
 ; nested multiple value binds representing ripple wiring
 (defmacro wire (bindings &body body)
   (if (null bindings)
@@ -385,16 +385,16 @@
         `(multiple-value-bind ,(if (listp vars) vars (list vars)) ,form
            (wire ,(rest bindings) ,@body)))))
 
-(test 
+(test
   (macroexpand-1
     '(wire (((carry0 sum0) (halfadder b c))
             ((carry1 sum) (halfadder a sum0))
             (carry (xor carry0 carry1)))
       (values carry sum)))
-  (values 
-    '(MULTIPLE-VALUE-BIND 
-      (CARRY0 SUM0) (HALFADDER B C) 
-      (WIRE (((CARRY1 SUM) (HALFADDER A SUM0)) 
+  (values
+    '(MULTIPLE-VALUE-BIND
+      (CARRY0 SUM0) (HALFADDER B C)
+      (WIRE (((CARRY1 SUM) (HALFADDER A SUM0))
              (CARRY (XOR CARRY0 CARRY1))) (VALUES CARRY SUM)))
     T))
 
@@ -473,7 +473,7 @@
   (check-type ny bit)
   (check-type f bit)
   (check-type no bit)
-  
+
   (wire ((x0 (dmux16 x zx))
          (y0 (dmux16 y zy))
          (x1 (mux16 x0 (not16 x0) nx))
@@ -483,67 +483,67 @@
     (values out (not (or16way out)) (bit out 0))))
 
 
-(test (alu    #*0000000000010001 
-              #*0000000000000011 
+(test (alu    #*0000000000010001
+              #*0000000000000011
                                        1 0 1 0 1 0) ; 0
       (values #*0000000000000000 1 0)) ; 0
 
-(test (alu    #*0000000000010001 
-              #*0000000000000011 
+(test (alu    #*0000000000010001
+              #*0000000000000011
                                        1 1 1 1 1 1) ; 1
       (values #*0000000000000001 0 0)) ; 1
 
-(test (alu    #*0000000000010001 
-              #*0000000000000011 
+(test (alu    #*0000000000010001
+              #*0000000000000011
                                        1 1 1 0 1 0) ; -1
       (values #*1111111111111111 0 1)) ; -1
 
 (test (alu    #*0000000000010001 ; x = 17
-              #*0000000000000011 
+              #*0000000000000011
                                        0 0 1 1 0 0) ; x
       (values #*0000000000010001 0 0)) ; 17
 
-(test (alu    #*0000000000010001 
+(test (alu    #*0000000000010001
               #*0000000000000011 ; y = 3
                                        1 1 0 0 0 0) ; y
       (values #*0000000000000011 0 0)) ; 3
 
 (test (alu    #*0000000000010001 ; x = 17
-              #*0000000000000011 
+              #*0000000000000011
                                        0 0 1 1 0 1) ; !x
       (values #*1111111111101110 0 1)) ; -18
 
-(test (alu    #*0000000000010001 
+(test (alu    #*0000000000010001
               #*0000000000000011 ; y = 3
                                        1 1 0 0 0 1) ; !y
       (values #*1111111111111100 0 1)) ; -4
 
 (test (alu    #*0000000000010001 ; x = 17
-              #*0000000000000011 
+              #*0000000000000011
                                        0 0 1 1 1 1) ; -x
       (values #*1111111111101111 0 1)) ; -17
 
-(test (alu    #*0000000000010001 
+(test (alu    #*0000000000010001
               #*0000000000000011 ; y = 3
                                        1 1 0 0 1 1) ; -y
       (values #*1111111111111101 0 1)) ; -3
 
 (test (alu    #*0000000000010001 ; x = 17
-              #*0000000000000011 
+              #*0000000000000011
                                        0 1 1 1 1 1) ; x + 1
       (values #*0000000000010010 0 0)) ; 18
 
-(test (alu    #*0000000000010001 
+(test (alu    #*0000000000010001
               #*0000000000000011 ; y = 3
                                        1 1 0 1 1 1) ; y + 1
       (values #*0000000000000100 0 0)) ; 4
 
 (test (alu    #*0000000000010001 ; x = 17
-              #*0000000000000011 
+              #*0000000000000011
                                        0 0 1 1 1 0) ; x - 1
       (values #*0000000000010000 0 0)) ; 16
 
-(test (alu    #*0000000000010001 
+(test (alu    #*0000000000010001
               #*0000000000000011 ; y = 3
                                        1 1 0 0 1 0) ; y - 1
       (values #*0000000000000010 0 0)) ; 2
@@ -579,7 +579,7 @@
       (values #*0000000000000000 1 0)) ; 0
 
 (test (alu    #*1111111111111111 ; x = -1
-              #*0000000000000011 
+              #*0000000000000011
                                        0 1 1 1 1 1) ; x + 1
       (values #*0000000000000000 1 0)) ; 0
 
@@ -590,12 +590,12 @@
 ;===============================================================================
 
 (defun make-sr-latch ()
- (let ((q 0)
-       (q-not 1))
-   (lambda (s r)
-     (setf q-not (nand q r))
-     (values (setf q (nand s q-not))
-             (setf q-not (nand q r))))))
+  (let ((q 0)
+        (q-not 1))
+    (lambda (s r)
+      (setf q-not (nand q r))
+      (values (setf q (nand s q-not))
+              (setf q-not (nand q r))))))
 
 (defparameter test-latch (make-sr-latch))
 
@@ -617,7 +617,7 @@
 (test (funcall test-latch 0 1) (values 1 0))
 (test (funcall test-latch 0 1) (values 1 0))
 (test (funcall test-latch 0 0) (values 1 1))
-(test (funcall test-latch 1 1) (values 1 0)) 
+(test (funcall test-latch 1 1) (values 1 0))
 
 #|
 (defun d-latch (d e &aux (en (not e)))
@@ -629,7 +629,7 @@
     (lambda (d en)
       (wire ((a (nand d en))
              (b (nand (not d) en)))
-            (values (funcall latch a b))))))
+        (values (funcall latch a b))))))
 
 (defparameter *test-d-latch-01* (make-d-latch))
 
@@ -824,9 +824,9 @@
 
 (fill-ram *test-ram8* (sequential-ram-filler 3) 3)
 (test (ram-to-array *test-ram8* 3)
-      #(#*0000000000000000 #*0000000000000001 
-        #*0000000000000010 #*0000000000000011 
-        #*0000000000000100 #*0000000000000101 
+      #(#*0000000000000000 #*0000000000000001
+        #*0000000000000010 #*0000000000000011
+        #*0000000000000100 #*0000000000000101
         #*0000000000000110 #*0000000000000111))
 
 ;-------------------------------------------------------------------------------
@@ -846,8 +846,8 @@
       (wire ((bank-address (subseq address 0 3))
              (register-address (subseq address 3 6))
              ((load0 load1 load2 load3 load4 load5 load6 load7)
-          (dmux8way load bank-address)))
-        (mux8way16 
+              (dmux8way load bank-address)))
+        (mux8way16
           (funcall r0 in16 register-address load0 clock)
           (funcall r1 in16 register-address load1 clock)
           (funcall r2 in16 register-address load2 clock)
@@ -873,8 +873,8 @@
       (wire ((bank-address (subseq address 0 3))
              (ram64-address (subseq address 3 9))
              ((load0 load1 load2 load3 load4 load5 load6 load7)
-          (dmux8way load bank-address)))
-        (mux8way16 
+              (dmux8way load bank-address)))
+        (mux8way16
           (funcall r0 in16 ram64-address load0 clock)
           (funcall r1 in16 ram64-address load1 clock)
           (funcall r2 in16 ram64-address load2 clock)
@@ -900,8 +900,8 @@
       (wire ((bank-address (subseq address 0 3))
              (ram512-address (subseq address 3 12))
              ((load0 load1 load2 load3 load4 load5 load6 load7)
-          (dmux8way load bank-address)))
-        (mux8way16 
+              (dmux8way load bank-address)))
+        (mux8way16
           (funcall r0 in16 ram512-address load0 clock)
           (funcall r1 in16 ram512-address load1 clock)
           (funcall r2 in16 ram512-address load2 clock)
@@ -937,8 +937,8 @@
       (wire ((bank-address (subseq address 0 2))
              (ram4k-address (subseq address 2 14))
              ((load0 load1 load2 load3)
-          (dmux4way load bank-address)))
-        (mux4way16 
+              (dmux4way load bank-address)))
+        (mux4way16
           (funcall r0 in16 ram4k-address load0 clock)
           (funcall r1 in16 ram4k-address load1 clock)
           (funcall r2 in16 ram4k-address load2 clock)
@@ -971,13 +971,13 @@
     (lambda (in16 inc load reset clock)
       ; update output wire vars
       (setf out16 (funcall register #*0000000000000000 0 clock))
-      (funcall register 
-               (mux16 
-                 (mux16 
+      (funcall register
+               (mux16
+                 (mux16
                    (mux16 out16 (inc16 out16) inc)
-                   in16 load) 
-                 #*0000000000000000 reset) 
-               (or reset (or load inc)) 
+                   in16 load)
+                 #*0000000000000000 reset)
+               (or reset (or load inc))
                clock))))
 
 (defparameter *test-pc* (make-pc))
@@ -1005,7 +1005,7 @@
 
 ;===============================================================================
 
-; A ::   0 v v v  v  v  v  v   v  v  v  v   v  v  v  v   
+; A ::   0 v v v  v  v  v  v   v  v  v  v   v  v  v  v
 ; C ::   1 1 1 a  c1 c2 c3 c4  c5 c6 d1 d2  d3 j1 j2 j3
 
 (defun make-cpu ()
@@ -1016,15 +1016,15 @@
          (D-out #*0000000000000000))
 
     (lambda (inM16 instruction16 reset clock)
-      
+
       ; update output wire vars
       (setf A-out (funcall A #*0000000000000000 0 clock))
       (setf D-out (funcall D #*0000000000000000 0 clock))
-      
+
       (wire ((C? (bit instruction16 0))
              (A? (not C?))
              (A-or-M (mux16 A-out inM16 (bit instruction16 3)))
-             
+
              ((out eq lt) ; zr ng
               (alu D-out A-or-M
                    (bit instruction16 4)  ; zx
@@ -1034,29 +1034,29 @@
                    (bit instruction16 8)  ; f
                    (bit instruction16 9))) ; no
              (gt (and (not eq) (not lt)))
-             
+
              (write-to-A (and C? (bit instruction16 10)))
              (write-to-D (and C? (bit instruction16 11)))
              (write-to-M (and C? (bit instruction16 12)))
-             
+
              (j1 (bit instruction16 13))
              (j2 (bit instruction16 14))
              (j3 (bit instruction16 15))
 
              (load-pc? ; jump
               (and C? (or (and j1 lt) (or (and j2 eq) (and j3 gt)))))
-             
+
              (inc-pc? (not load-pc?)))
 
         (funcall A (mux16 out instruction16 A?) (or A? write-to-A) clock)
         (funcall D out write-to-D clock)
-        
+
         (values out
                 write-to-M
                 (subseq A-out 1) ; 15 bits (addressM)
                 (subseq (funcall pc A-out inc-pc? load-pc? reset clock)
                         1)))))) ; 15 bits (pc)
-    
+
 (defparameter *test-cpu* (make-cpu))
 (test (funcall *test-cpu* #*0000000000000000
                #*0011000000111001 0 0) ; A, @12345
@@ -1183,7 +1183,7 @@
 
 (defun update-keyboard-register (ram)
   (write-word-to-ram ram #*110000000000000 ; 24576
-                    (read-keyboard-from-file keyboard)))
+                 (read-keyboard-from-file keyboard)))
 
 ;-------------------------------------------------------------------------------
 
