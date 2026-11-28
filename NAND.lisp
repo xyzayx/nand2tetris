@@ -18,20 +18,22 @@
 ;-------------------------------------------------------------------------------
 
 (defun test-predicate (a b)
-  (cl:or (if (numberp b) (eq a b) (equalp a b))
+  (cl:or (if (numberp b) (eql a b) (equalp a b))
          (eq :____ b)))
 
 (defmacro test (expr expected)
-  `(block test
-     (let ((want (multiple-value-list ,expected)))
-       (handler-bind ((condition
-                        (lambda (c)
-                          (when (cl:and (symbolp (first want))
-                                        (typep c (first want)))
-                            (return-from test (type-of c))))))
-         (let ((got (multiple-value-list ,expr)))
-           (assert (every #'test-predicate got want))
-           (values-list got))))))
+  (let ((want (gensym)))
+    `(let* ((,want (multiple-value-list ,expected))
+            (got (multiple-value-list ,expr)))
+       ; EVERY stops at the shorter list.
+       (assert (= (length got) (length ,want)))
+       (assert (every #'test-predicate got ,want))
+       (values-list got))))
+
+(defmacro test-error (expr &optional (type 'error))
+  `(handler-case (progn ,expr (values))
+     (,type (c) (type-of c))
+     (:no-error () (assert nil))))
 
 (macroexpand '(test (list 0 1) :____))
 (test ((lambda () (values 0 1))) (values 0 1))
@@ -50,9 +52,9 @@
 (test (nand 0 1) 1) 
 (test (nand 1 0) 1)
 (test (nand 1 1) 0)
-(test (nand 0.2 1) 'error)
-(test (nand 0 'x) 'error)
-(test (nand 2 10) 'error)
+(test-error (nand 0.2 1))
+(test-error (nand 0 'x))
+(test-error (nand 2 10))
 
 ;-------------------------------------------------------------------------------
 
@@ -60,8 +62,8 @@
 
 (test (not 1) 0)
 (test (not 0) 1)
-(test (not 0.2) 'error)
-(test (not 'x) 'error)
+(test-error (not 0.2))
+(test-error (not 'x))
 
 (defun and (a b) (not (nand a b)))
 
@@ -83,7 +85,7 @@
 (test (xor 1 0) 1)
 (test (xor 0 1) 1)
 (test (xor 1 1) 0)
-(test (xor 0.2 1) 'error)
+(test-error (xor 0.2 1))
 
 (defun mux (a b sel)
 	(or (and a (not sel)) (and b sel) ))
@@ -122,9 +124,9 @@
 
 (test (not16 #*1000100010001000) #*0111011101110111)
 (test (not16 #*0000000000000000) #*1111111111111111)
-(test (not16 1) 'error)
-(test (not16 #*001) 'error)
-(test (not16 #*11110000111100001) 'error)
+(test-error (not16 1))
+(test-error (not16 #*001))
+(test-error (not16 #*11110000111100001))
 
 (defun and16 (a16 b16) 
   (check-type a16 bus16)
@@ -134,8 +136,8 @@
 (test (and16 #*1000100010001000 #*0001000100010001) #*0000000000000000)
 (test (and16 #*1000100010001000 #*1111111111111111) #*1000100010001000)
 (test (and16 #*1111111111111111 #*1111111111111111) #*1111111111111111)
-(test (and16 #*0000 #*1111) 'error)
-(test (and16 #*1000100010001000 #*000100010001000101) 'error)
+(test-error (and16 #*0000 #*1111))
+(test-error (and16 #*1000100010001000 #*000100010001000101))
 
 (defun or16 (a16 b16) 
   (check-type a16 bus16)
@@ -145,7 +147,7 @@
 (test (or16 #*1000100010001000 #*0001000100010001) #*1001100110011001)
 (test (or16 #*1000100010001000 #*1111111111111111) #*1111111111111111)
 (test (or16 #*1111111111111111 #*1111111111111111) #*1111111111111111)
-(test (or16 #*0000 #*1111) 'error)
+(test-error (or16 #*0000 #*1111))
 
 (defun mux16 (a16 b16 sel)
   (check-type a16 bus16)
@@ -155,8 +157,8 @@
 
 (test (mux16 #*1000100010001000 #*0001000100010001 0) #*1000100010001000)
 (test (mux16 #*1000100010001000 #*1111111111111111 1) #*1111111111111111)
-(test (mux16 #*1000100010001000 #*1111111111111111 2) 'error)
-(test (mux16 #*1000100010001000 #*111111111111111 0) 'error)
+(test-error (mux16 #*1000100010001000 #*1111111111111111 2))
+(test-error (mux16 #*1000100010001000 #*111111111111111 0))
 
 ;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -183,8 +185,8 @@
       (values #*0000000000000000 #*1111111111111111))
 (test (dmux16 #*0000000000000000 1) 
       (values #*0000000000000000 #*0000000000000000))
-(test (dmux16 #*1000100010001000 2) 'error)
-(test (dmux16 #*100010001000100 0) 'error)
+(test-error (dmux16 #*1000100010001000 2))
+(test-error (dmux16 #*100010001000100 0))
 
 ;-------------------------------------------------------------------------------
 
@@ -207,7 +209,7 @@
 (test (or8way #*00001000) 1)
 (test (or8way #*11111000) 1)
 (test (or8way #*00000000) 0)
-(test (or8way 1) 'error)
+(test-error (or8way 1))
 
 (defun or16way (in16)
   (check-type in16 bus16)
@@ -216,7 +218,7 @@
 (test (or16way #*0000100000001000) 1)
 (test (or16way #*1111100000001000) 1)
 (test (or16way #*0000000000000000) 0)
-(test (or16way 1) 'error)
+(test-error (or16way 1))
 
 
 (defun mux4way16 (a b c d sel)
@@ -361,7 +363,7 @@
 (test (dmux8way 1 #*110) (values 0 0 0 0 0 0 1 0))
 (test (dmux8way 1 #*111) (values 0 0 0 0 0 0 0 1))
 
-(test (dmux8way 0 #*11) 'error)
+(test-error (dmux8way 0 #*11))
 
 (test (dmux8way 0 #*000) (values 0 0 0 0 0 0 0 0))
 (test (dmux8way 0 #*001) (values 0 0 0 0 0 0 0 0))
@@ -450,7 +452,7 @@
 (test (add16 #*1111111111111111 #*1111111111111111) #*1111111111111110)
 (test (add16 #*1111111111111111 #*0000000000000001) #*0000000000000000)
 (test (add16 #*0000000000100000 #*1000000000100000) #*1000000001000000)
-(test (add16 #*0000000000100000 #*100000000010000) 'error)
+(test-error (add16 #*0000000000100000 #*100000000010000))
 
 (defun inc16 (in16) (add16 in16 #*0000000000000001))
 
@@ -458,7 +460,7 @@
 (test (inc16 #*0001000100010001) #*0001000100010010)
 (test (inc16 #*1111111111111111) #*0000000000000000)
 (test (inc16 #*0000000000100000) #*0000000000100001)
-(test (inc16 #*000000000010000) 'error)
+(test-error (inc16 #*000000000010000))
 
 ;-------------------------------------------------------------------------------
 
@@ -581,9 +583,9 @@
                                        0 1 1 1 1 1) ; x + 1
       (values #*0000000000000000 1 0)) ; 0
 
-(test (alu #*0000 #*0000000000000011 1 0 1 0 1 0) 'error)
-(test (alu #*0000000000010001 #*0000 1 0 1 0 1 0) 'error)
-(test (alu #*0000000000010001 #*0000000000000011 2 0 1 0 1 0) 'error)
+(test-error (alu #*0000 #*0000000000000011 1 0 1 0 1 0))
+(test-error (alu #*0000000000010001 #*0000 1 0 1 0 1 0))
+(test-error (alu #*0000000000010001 #*0000000000000011 2 0 1 0 1 0))
 
 ;===============================================================================
 
@@ -800,7 +802,7 @@
 
 (defun fill-ram (ram filler bus-lines-n)
   (loop for in16 across filler
-        for i from 0
+        for i from 0 below (bus-size-int bus-lines-n)
         for address = (to-bits i bus-lines-n)
         do (funcall ram in16 address 1 0)
            (funcall ram in16 address 1 1)))
@@ -1121,14 +1123,13 @@
 (defun make-rom32k (prog-array)
   (let ((mem (make-ram32k)))
     (fill-ram mem prog-array 15)
-    (values 
-      (lambda (address clock)
-        (funcall mem #*0000000000000000 address 0 clock))
-      mem)))
+    (lambda (address clock)
+      (funcall mem #*0000000000000000 address 0 clock))))
 
-(multiple-value-bind (rom test-rom) (make-rom32k (sequential-ram-filler 15))
-                     (declare (ignore rom))
-                     (test-ram test-rom 15))
+(let ((rom (make-rom32k #(#*0000000000000010
+                         #*1110110000010000))))
+  (test (funcall rom #*000000000000000 0) #*0000000000000010)
+  (test (funcall rom #*000000000000001 0) #*1110110000010000))
 
 ;-------------------------------------------------------------------------------
 
@@ -1157,16 +1158,18 @@
 (defun to-internal-time-units (ms)
   (ceiling (* ms internal-time-units-per-second) 1000))
 
-(defmacro do-at-interval (ms &body body)
-  (let ((now (gensym))
-        (next (gensym)))
-    `(let ((,now (get-internal-real-time))
-           (,next (load-time-value (list 0)))) ; avoid defvar (gensym)
-       (when (>= ,now (car ,next))
-         ,@body
-         (setf (car ,next) (+ ,now (to-internal-time-units ,ms)))))))
+(defun clear-interval (name)
+  (remprop name 'interval-deadline))
 
-(macroexpand '(do-at-interval 100 (print "tick")))
+(defmacro do-at-interval (name ms &body body)
+  (let ((now (gensym)))
+    `(let ((,now (get-internal-real-time)))
+       (when (>= ,now (get ',name 'interval-deadline 0))
+         ,@body
+         (setf (get ',name 'interval-deadline)
+               (+ ,now (to-internal-time-units ,ms)))))))
+
+(macroexpand '(do-at-interval example 100 (print "pretty")))
 
 ;-------------------------------------------------------------------------------
 
@@ -1226,13 +1229,17 @@
 
 (defun run-computer (computer n-cycles end-pc
                      &key (fps 1) (keyboard-poll-ms 100))
+  (clear-interval 'keyboard)
+  (clear-interval 'screen)
   (wire ((frame-ms (fps-to-ms fps))
          ((ram pc) (single-step computer 1)))
     (dotimes (cycle n-cycles)
-      (do-at-interval keyboard-poll-ms (update-keyboard-register ram))
+      (do-at-interval keyboard keyboard-poll-ms
+        (update-keyboard-register ram))
       (setf pc (second (multiple-value-list (single-step computer))))
       (when (equal pc end-pc) (return))
-      (do-at-interval frame-ms (refresh-screen ram)))
+      (do-at-interval screen frame-ms (refresh-screen ram)))
+    (refresh-screen ram) ; commit screen before exit
     (values ram pc)))
 
 ;===============================================================================
@@ -1375,7 +1382,7 @@
 
 (defun test-computer-rect ()
   (wire (((computer ram) (make-computer *rect-program*))
-         (height #*0000000000000100) ; 256
+         (height #*0000000000000100) ; 4
          (end-pc #*000000000010111)) ; @END, ROM[23]
     (preset-ram ram height)
     (test (nth-value 1 (run-computer computer 63 end-pc)) end-pc)
